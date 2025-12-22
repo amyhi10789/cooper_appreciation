@@ -1,0 +1,9 @@
+torch
+torchvision
+accelerate
+diffusers
+transformers
+safetensors
+pillow
+tqdm
+omegaconf
