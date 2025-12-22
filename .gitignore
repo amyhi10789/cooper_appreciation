@@ -1,12 +1,9 @@
-# Python
 __pycache__/
 *.pyc
 venv/
 
-# Model outputs
 output/
 *.safetensors
 *.ckpt
 
-# Hugging Face cache (optional)
 .cache/
