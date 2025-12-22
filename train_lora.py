@@ -2,37 +2,43 @@ import os
 import itertools
 import yaml
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
 from accelerate import Accelerator
-from diffusers import StableDiffusionXLPipeline
-from peft import LoraConfig
 from torchvision import transforms
+
+from diffusers import StableDiffusionXLPipeline, DDPMScheduler
+from diffusers import LoraConfig
 
 class ImageTextDataset(Dataset):
     def __init__(self, image_dir, prompt, resolution=1024):
         self.image_dir = image_dir
         self.prompt = prompt
-        self.transform = transforms.Compose([
-            transforms.Resize((resolution, resolution)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-        ])
+        self.resolution = resolution
+
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize((resolution, resolution)),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ]
+        )
 
         self.images = [
             f for f in os.listdir(image_dir)
             if f.lower().endswith((".png", ".jpg", ".jpeg"))
         ]
+        if len(self.images) == 0:
+            raise ValueError(f"No images found in {image_dir}")
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        image = Image.open(
-            os.path.join(self.image_dir, self.images[idx])
-        ).convert("RGB")
-
+        path = os.path.join(self.image_dir, self.images[idx])
+        image = Image.open(path).convert("RGB")
         return {
             "pixel_values": self.transform(image),
             "prompt": self.prompt,
@@ -42,16 +48,20 @@ def main():
     with open("config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
 
-    accelerator = Accelerator(
-        mixed_precision=cfg.get("mixed_precision", "fp16")
-    )
+    mixed_precision = cfg.get("mixed_precision", "fp16")
+    grad_accum = int(cfg.get("gradient_accumulation_steps", 1))
+    accelerator = Accelerator(mixed_precision=mixed_precision, gradient_accumulation_steps=grad_accum)
     device = accelerator.device
+
+    weight_dtype = torch.float16 if mixed_precision == "fp16" else torch.float32
 
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
-        torch_dtype=torch.float16,
+        dtype=weight_dtype,
         use_safetensors=True,
     ).to(device)
+
+    noise_scheduler = DDPMScheduler.from_pretrained(cfg["model_name_or_path"], subfolder="scheduler")
 
     if torch.cuda.is_available():
         try:
@@ -74,132 +84,153 @@ def main():
     ):
         p.requires_grad_(False)
 
+    rank = int(cfg["rank"])
     lora_config = LoraConfig(
-        r=cfg["rank"],
-        lora_alpha=cfg["rank"],
-        target_modules=[
-            "to_q",
-            "to_k",
-            "to_v",
-            "to_out.0",
-        ],
-        lora_dropout=0.0,
+        r=rank,
+        lora_alpha=int(cfg.get("lora_alpha", rank)),
+        lora_dropout=float(cfg.get("lora_dropout", 0.0)),
         bias="none",
+        target_modules=["to_q", "to_k", "to_v", "to_out.0"],
     )
-
     unet.add_adapter(lora_config)
 
+    trainable_params = [p for p in unet.parameters() if p.requires_grad]
+    if len(trainable_params) == 0:
+        raise RuntimeError("No trainable params found. LoRA may not have attached correctly.")
+
     optimizer = torch.optim.AdamW(
-        [p for p in unet.parameters() if p.requires_grad],
+        trainable_params,
         lr=float(cfg["learning_rate"]),
+        betas=(0.9, 0.999),
+        weight_decay=float(cfg.get("weight_decay", 0.0)),
+        eps=1e-8,
     )
 
+    resolution = int(cfg.get("resolution", 1024))
     dataset = ImageTextDataset(
         cfg["instance_data_dir"],
         cfg["instance_prompt"],
-        cfg["resolution"],
+        resolution,
     )
 
     dataloader = DataLoader(
         dataset,
-        batch_size=cfg["train_batch_size"],
+        batch_size=int(cfg["train_batch_size"]),
         shuffle=True,
-        num_workers=4,
+        num_workers=int(cfg.get("num_workers", 4)),
+        pin_memory=True,
     )
 
-    dataloader, optimizer, unet = accelerator.prepare(
-        dataloader, optimizer, unet
-    )
+    dataloader, optimizer, unet = accelerator.prepare(dataloader, optimizer, unet)
 
     unet.train()
     global_step = 0
+    max_train_steps = int(cfg["max_train_steps"])
+    log_every = int(cfg.get("log_every", 50))
 
-    for epoch in range(100):
+    for epoch in range(int(cfg.get("num_epochs", 10_000_000))):
         for batch in dataloader:
             with accelerator.accumulate(unet):
-                pixel_values = batch["pixel_values"].to(
-                    device=device,
-                    dtype=vae.dtype,
-                )
+                pixel_values = batch["pixel_values"].to(device=device, dtype=vae.dtype)
 
-                latents = vae.encode(pixel_values).latent_dist.sample()
-                latents = latents * vae.config.scaling_factor
+                with torch.no_grad():
+                    latents = vae.encode(pixel_values).latent_dist.sample()
+                    latents = latents * vae.config.scaling_factor
 
                 noise = torch.randn_like(latents)
+                bsz = latents.shape[0]
                 timesteps = torch.randint(
                     0,
-                    pipe.scheduler.config.num_train_timesteps,
-                    (latents.shape[0],),
+                    noise_scheduler.config.num_train_timesteps,
+                    (bsz,),
                     device=device,
+                    dtype=torch.long,
                 )
 
-                noisy_latents = pipe.scheduler.add_noise(
-                    latents, noise, timesteps
-                )
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+                prompts = batch["prompt"]
+                if isinstance(prompts, str):
+                    prompts = [prompts] * bsz
 
                 input_ids_1 = tokenizer_1(
-                    batch["prompt"],
+                    prompts,
                     padding="max_length",
                     truncation=True,
                     return_tensors="pt",
                 ).input_ids.to(device)
 
                 input_ids_2 = tokenizer_2(
-                    batch["prompt"],
+                    prompts,
                     padding="max_length",
                     truncation=True,
                     return_tensors="pt",
                 ).input_ids.to(device)
 
-                encoder_hidden_states = text_encoder_1(input_ids_1)[0]
-                encoder_output_2 = text_encoder_2(input_ids_2, output_hidden_states=True)
+                with torch.no_grad():
+                    encoder_hidden_states = text_encoder_1(input_ids_1)[0]
 
-                pooled_text_embeds = encoder_output_2[1]
-
-
-                batch_size = pooled_text_embeds.shape[0]
+                    out2 = text_encoder_2(input_ids_2)
+                    pooled_text_embeds = out2[1]
 
                 time_ids = torch.tensor(
-                    [[
-                        cfg["resolution"], cfg["resolution"], 
-                        0, 0,                              
-                        cfg["resolution"], cfg["resolution"],
-                    ]] * batch_size,
+                    [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
                     device=device,
                     dtype=pooled_text_embeds.dtype,
                 )
 
-                noise_pred = unet(
+                model_pred = unet(
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states,
                     added_cond_kwargs={
                         "text_embeds": pooled_text_embeds,
-                        "time_ids": time_ids,  
+                        "time_ids": time_ids,
                     },
                 ).sample
 
-                loss = torch.nn.functional.mse_loss(noise_pred, noise)
-                accelerator.backward(loss)
+                if noise_scheduler.config.prediction_type == "epsilon":
+                    target = noise
+                elif noise_scheduler.config.prediction_type == "v_prediction":
+                    target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                else:
+                    raise ValueError(f"Unknown prediction_type: {noise_scheduler.config.prediction_type}")
 
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+
+                accelerator.backward(loss)
                 optimizer.step()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
 
             global_step += 1
 
-            if accelerator.is_main_process and global_step % 50 == 0:
-                print(f"Step {global_step} | Loss {loss.item():.4f}")
+            if accelerator.is_main_process and global_step % log_every == 0:
+                print(f"Step {global_step}/{max_train_steps} | Loss {loss.item():.4f}")
 
-            if global_step >= cfg["max_train_steps"]:
+            if global_step >= max_train_steps:
                 break
 
-        if global_step >= cfg["max_train_steps"]:
+        if global_step >= max_train_steps:
             break
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        os.makedirs(cfg["output_dir"], exist_ok=True)
-        unet.save_attn_procs(cfg["output_dir"])
+        outdir = cfg["output_dir"]
+        os.makedirs(outdir, exist_ok=True)
+
+        unet_to_save = accelerator.unwrap_model(unet)
+
+        unet_to_save.save_lora_weights(outdir)
+
+        with open(os.path.join(outdir, "lora_info.txt"), "w") as f:
+            f.write(f"base_model: {cfg['model_name_or_path']}\n")
+            f.write(f"rank: {rank}\n")
+            f.write(f"learning_rate: {cfg['learning_rate']}\n")
+            f.write(f"resolution: {resolution}\n")
+            f.write(f"steps: {max_train_steps}\n")
+            f.write(f"prompt: {cfg['instance_prompt']}\n")
+
+        print(f"Saved LoRA weights to: {outdir}")
 
     accelerator.end_training()
 
