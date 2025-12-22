@@ -10,7 +10,7 @@ from accelerate import Accelerator
 from torchvision import transforms
 
 from diffusers import StableDiffusionXLPipeline, DDPMScheduler
-from diffusers.models.lora import LoraConfig
+from diffusers import LoraConfig
 
 class ImageTextDataset(Dataset):
     def __init__(self, image_dir, prompt, resolution=1024):
