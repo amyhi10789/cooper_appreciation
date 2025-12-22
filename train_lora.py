@@ -91,7 +91,7 @@ def main():
 
     optimizer = torch.optim.AdamW(
         [p for p in unet.parameters() if p.requires_grad],
-        lr=cfg["learning_rate"],
+        lr=float(cfg["learning_rate"]),
     )
 
     dataset = ImageTextDataset(
