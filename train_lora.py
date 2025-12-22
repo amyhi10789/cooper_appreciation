@@ -152,16 +152,17 @@ def main():
                 ).input_ids.to(device)
 
                 encoder_hidden_states = text_encoder_1(input_ids_1)[0]
-                encoder_output_2 = text_encoder_2(input_ids_2)
-                encoder_hidden_states_2 = encoder_output_2[0]
+                encoder_output_2 = text_encoder_2(input_ids_2, output_hidden_states=True)
+
                 pooled_text_embeds = encoder_output_2[1]
 
-                batch_size = pixel_values.shape[0]
+
+                batch_size = pooled_text_embeds.shape[0]
 
                 time_ids = torch.tensor(
                     [[
-                        cfg["resolution"], cfg["resolution"],
-                        0, 0,                                
+                        cfg["resolution"], cfg["resolution"], 
+                        0, 0,                              
                         cfg["resolution"], cfg["resolution"],
                     ]] * batch_size,
                     device=device,
@@ -174,7 +175,7 @@ def main():
                     encoder_hidden_states,
                     added_cond_kwargs={
                         "text_embeds": pooled_text_embeds,
-                        "time_ids": time_ids,
+                        "time_ids": time_ids,  
                     },
                 ).sample
 
