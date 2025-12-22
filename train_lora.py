@@ -1,25 +1,27 @@
+"""
+train_lora_personX.py
+----------------------------------
+Trains a LoRA on SDXL to represent Person X.
+Author: You
+"""
+
 import os
+import torch
 import itertools
 import yaml
-import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-
-from accelerate import Accelerator
 from diffusers import StableDiffusionXLPipeline
-from peft import LoraConfig
-from torchvision import transforms
+from diffusers.models.lora import LoRALinearLayer
 
+# ==========================
+# Dataset class
+# ==========================
 class ImageTextDataset(Dataset):
-    def __init__(self, image_dir, prompt, resolution=1024):
+    def __init__(self, image_dir, prompt, resolution=768):
         self.image_dir = image_dir
         self.prompt = prompt
-        self.transform = transforms.Compose([
-            transforms.Resize((resolution, resolution)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-        ])
-
+        self.resolution = resolution
         self.images = [
             f for f in os.listdir(image_dir)
             if f.lower().endswith((".png", ".jpg", ".jpeg"))
@@ -29,164 +31,123 @@ class ImageTextDataset(Dataset):
         return len(self.images)
 
     def __getitem__(self, idx):
-        image = Image.open(
-            os.path.join(self.image_dir, self.images[idx])
-        ).convert("RGB")
+        img_path = os.path.join(self.image_dir, self.images[idx])
+        image = Image.open(img_path).convert("RGB")
+        image = image.resize((self.resolution, self.resolution))
 
-        return {
-            "pixel_values": self.transform(image),
-            "prompt": self.prompt,
-        }
+        # Convert to PyTorch tensor [C,H,W] and scale to [0,1]
+        image = torch.tensor(
+            (torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
+             .float()
+             .view(self.resolution, self.resolution, 3) / 255.0)
+        ).permute(2, 0, 1)
 
+        return {"pixel_values": image, "prompt": self.prompt}
+
+# ==========================
+# Main training function
+# ==========================
 def main():
+    # --------------------------
+    # Load config
+    # --------------------------
     with open("config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
 
-    accelerator = Accelerator(
-        mixed_precision=cfg.get("mixed_precision", "fp16")
-    )
-    device = accelerator.device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
 
+    # --------------------------
+    # Load SDXL base model
+    # --------------------------
+    print("Loading SDXL base model...")
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
-        torch_dtype=torch.float16,
-        use_safetensors=True,
+        torch_dtype=torch.float16 if device=="cuda" else torch.float32,
     ).to(device)
 
-    if torch.cuda.is_available():
-        try:
-            pipe.enable_xformers_memory_efficient_attention()
-        except Exception:
-            pass
+    # Freeze all model parameters (only train LoRA layers)
+    for p in itertools.chain(pipe.unet.parameters(), pipe.vae.parameters(), pipe.text_encoder.parameters()):
+        p.requires_grad = False
 
-    unet = pipe.unet
-    vae = pipe.vae
-    text_encoder_1 = pipe.text_encoder
-    text_encoder_2 = pipe.text_encoder_2
-    tokenizer_1 = pipe.tokenizer
-    tokenizer_2 = pipe.tokenizer_2
+    # --------------------------
+    # Replace Linear layers with LoRA
+    # --------------------------
+    print("Adding LoRA layers...")
+    lora_layers = []
+    for name, module in pipe.unet.named_modules():
+        if isinstance(module, torch.nn.Linear):
+            lora = LoRALinearLayer(module.in_features, module.out_features, rank=cfg["rank"]).to(device)
+            module.forward = lora(module)
+            lora_layers.append(lora)
 
-    for p in itertools.chain(
-        unet.parameters(),
-        vae.parameters(),
-        text_encoder_1.parameters(),
-        text_encoder_2.parameters(),
-    ):
-        p.requires_grad_(False)
+    # --------------------------
+    # Dataset and DataLoader
+    # --------------------------
+    print("Preparing dataset...")
+    dataset = ImageTextDataset(cfg["instance_data_dir"], cfg["instance_prompt"], cfg["resolution"])
+    dataloader = DataLoader(dataset, batch_size=cfg["train_batch_size"], shuffle=True)
 
-    lora_config = LoraConfig(
-        r=cfg["rank"],
-        lora_alpha=cfg["rank"],
-        target_modules=[
-            "to_q",
-            "to_k",
-            "to_v",
-            "to_out.0",
-        ],
-        lora_dropout=0.0,
-        bias="none",
-    )
+    # --------------------------
+    # Optimizer
+    # --------------------------
+    optimizer = torch.optim.AdamW(itertools.chain(*(l.parameters() for l in lora_layers)),
+                                  lr=cfg["learning_rate"])
 
-    unet.add_adapter(lora_config)
-
-    optimizer = torch.optim.AdamW(
-        [p for p in unet.parameters() if p.requires_grad],
-        lr=float(cfg["learning_rate"]),
-    )
-
-    dataset = ImageTextDataset(
-        cfg["instance_data_dir"],
-        cfg["instance_prompt"],
-        cfg["resolution"],
-    )
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=cfg["train_batch_size"],
-        shuffle=True,
-        num_workers=4,
-    )
-
-    dataloader, optimizer, unet = accelerator.prepare(
-        dataloader, optimizer, unet
-    )
-
-    unet.train()
+    # --------------------------
+    # Training loop
+    # --------------------------
+    print("Starting training...")
     global_step = 0
+    max_steps = cfg["max_train_steps"]
 
-    for epoch in range(100):
+    while global_step < max_steps:
         for batch in dataloader:
-            with accelerator.accumulate(unet):
-                pixel_values = batch["pixel_values"].to(
-                    device=device,
-                    dtype=vae.dtype,
-                )
+            pixel_values = batch["pixel_values"].to(device)
+            prompts = batch["prompt"]
 
-                latents = vae.encode(pixel_values).latent_dist.sample()
-                latents = latents * vae.config.scaling_factor
+            # Encode images into latents
+            latents = pipe.vae.encode(pixel_values).latent_dist.sample()
+            latents = latents * pipe.vae.config.scaling_factor
 
-                noise = torch.randn_like(latents)
-                timesteps = torch.randint(
-                    0,
-                    pipe.scheduler.config.num_train_timesteps,
-                    (latents.shape[0],),
-                    device=device,
-                )
+            # Add noise for diffusion training
+            noise = torch.randn_like(latents)
+            timesteps = torch.randint(0, pipe.scheduler.config.num_train_timesteps,
+                                      (latents.shape[0],), device=device).long()
+            noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
-                noisy_latents = pipe.scheduler.add_noise(
-                    latents, noise, timesteps
-                )
+            # Encode text
+            input_ids = pipe.tokenizer(prompts, padding="max_length", truncation=True, return_tensors="pt").input_ids.to(device)
+            encoder_hidden_states = pipe.text_encoder(input_ids)[0]
 
-                input_ids_1 = tokenizer_1(
-                    batch["prompt"],
-                    padding="max_length",
-                    truncation=True,
-                    return_tensors="pt",
-                ).input_ids.to(device)
+            # Predict noise with UNet
+            noise_pred = pipe.unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
-                input_ids_2 = tokenizer_2(
-                    batch["prompt"],
-                    padding="max_length",
-                    truncation=True,
-                    return_tensors="pt",
-                ).input_ids.to(device)
+            # Compute MSE loss
+            loss = torch.nn.functional.mse_loss(noise_pred, noise)
 
-                encoder_hidden_states = text_encoder_1(input_ids_1)[0]
-                encoder_hidden_states_2 = text_encoder_2(input_ids_2)[0]
-
-                noise_pred = unet(
-                    noisy_latents,
-                    timesteps,
-                    encoder_hidden_states,
-                    added_cond_kwargs={
-                        "text_embeds": encoder_hidden_states_2,
-                    },
-                ).sample
-
-                loss = torch.nn.functional.mse_loss(noise_pred, noise)
-                accelerator.backward(loss)
-
-                optimizer.step()
-                optimizer.zero_grad()
+            # Backprop
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
 
             global_step += 1
+            if global_step % 50 == 0:
+                print(f"[Step {global_step}/{max_steps}] Loss: {loss.item():.4f}")
 
-            if accelerator.is_main_process and global_step % 50 == 0:
-                print(f"Step {global_step} | Loss {loss.item():.4f}")
-
-            if global_step >= cfg["max_train_steps"]:
+            if global_step >= max_steps:
                 break
 
-        if global_step >= cfg["max_train_steps"]:
-            break
+    # --------------------------
+    # Save LoRA weights
+    # --------------------------
+    os.makedirs(cfg["output_dir"], exist_ok=True)
+    save_path = os.path.join(cfg["output_dir"], "pytorch_lora_weights.safetensors")
+    torch.save({f"lora_{i}": layer.state_dict() for i, layer in enumerate(lora_layers)}, save_path)
+    print(f"Training complete. LoRA weights saved to {save_path}")
 
-    accelerator.wait_for_everyone()
-    if accelerator.is_main_process:
-        os.makedirs(cfg["output_dir"], exist_ok=True)
-        unet.save_attn_procs(cfg["output_dir"])
-
-    accelerator.end_training()
-
-
+# ==========================
+# Entry point
+# ==========================
 if __name__ == "__main__":
     main()
