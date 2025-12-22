@@ -117,7 +117,10 @@ def main():
     for epoch in range(100):
         for batch in dataloader:
             with accelerator.accumulate(unet):
-                pixel_values = batch["pixel_values"].to(device)
+                pixel_values = batch["pixel_values"].to(
+                    device=device,
+                    dtype=vae.dtype,
+                )
 
                 latents = vae.encode(pixel_values).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
