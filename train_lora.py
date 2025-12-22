@@ -11,9 +11,6 @@ from diffusers.models.lora import LoRALinearLayer
 from torchvision import transforms
 
 
-# -------------------------
-# Dataset
-# -------------------------
 class ImageTextDataset(Dataset):
     def __init__(self, image_dir, prompt, resolution=1024):
         self.image_dir = image_dir
@@ -43,9 +40,6 @@ class ImageTextDataset(Dataset):
         }
 
 
-# -------------------------
-# Main
-# -------------------------
 def main():
     with open("config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
@@ -61,7 +55,6 @@ def main():
         use_safetensors=True,
     ).to(device)
 
-    # Enable xFormers if available
     if torch.cuda.is_available():
         try:
             pipe.enable_xformers_memory_efficient_attention()
@@ -75,7 +68,6 @@ def main():
     tokenizer_1 = pipe.tokenizer
     tokenizer_2 = pipe.tokenizer_2
 
-    # Freeze everything
     for p in itertools.chain(
         unet.parameters(),
         vae.parameters(),
@@ -84,9 +76,6 @@ def main():
     ):
         p.requires_grad_(False)
 
-    # -------------------------
-    # Inject LoRA into UNet
-    # -------------------------
     lora_layers = []
 
     for name, module in unet.named_modules():
@@ -124,9 +113,6 @@ def main():
     unet.train()
     global_step = 0
 
-    # -------------------------
-    # Training Loop
-    # -------------------------
     for epoch in range(999999):
         for batch in dataloader:
             with accelerator.accumulate(unet):
@@ -190,9 +176,6 @@ def main():
         if global_step >= cfg["max_train_steps"]:
             break
 
-    # -------------------------
-    # Save LoRA Weights
-    # -------------------------
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         os.makedirs(cfg["output_dir"], exist_ok=True)
