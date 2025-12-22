@@ -17,7 +17,7 @@ class ImageTextDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.Resize((resolution, resolution)),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
         ])
 
         self.images = [
@@ -85,7 +85,6 @@ def main():
         ],
         lora_dropout=0.0,
         bias="none",
-        task_type="UNET",
     )
 
     unet.add_adapter(lora_config)
@@ -115,7 +114,7 @@ def main():
     unet.train()
     global_step = 0
 
-    for epoch in range(999999):
+    for epoch in range(100):
         for batch in dataloader:
             with accelerator.accumulate(unet):
                 pixel_values = batch["pixel_values"].to(device)
