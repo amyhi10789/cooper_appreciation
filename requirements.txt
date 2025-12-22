@@ -7,3 +7,4 @@ safetensors
 pillow
 tqdm
 omegaconf
+peft

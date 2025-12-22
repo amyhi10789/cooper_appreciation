@@ -7,9 +7,8 @@ from PIL import Image
 
 from accelerate import Accelerator
 from diffusers import StableDiffusionXLPipeline
-from diffusers.models.lora import LoRALinearLayer
+from peft import LoraConfig
 from torchvision import transforms
-
 
 class ImageTextDataset(Dataset):
     def __init__(self, image_dir, prompt, resolution=1024):
@@ -38,7 +37,6 @@ class ImageTextDataset(Dataset):
             "pixel_values": self.transform(image),
             "prompt": self.prompt,
         }
-
 
 def main():
     with open("config.yaml", "r") as f:
@@ -76,20 +74,24 @@ def main():
     ):
         p.requires_grad_(False)
 
-    lora_layers = []
+    lora_config = LoraConfig(
+        r=cfg["rank"],
+        lora_alpha=cfg["rank"],
+        target_modules=[
+            "to_q",
+            "to_k",
+            "to_v",
+            "to_out.0",
+        ],
+        lora_dropout=0.0,
+        bias="none",
+        task_type="UNET",
+    )
 
-    for name, module in unet.named_modules():
-        if isinstance(module, torch.nn.Linear):
-            lora = LoRALinearLayer(
-                module.in_features,
-                module.out_features,
-                rank=cfg["rank"],
-            )
-            module.lora_layer = lora
-            lora_layers.append(lora)
+    unet.add_adapter(lora_config)
 
     optimizer = torch.optim.AdamW(
-        itertools.chain(*(l.parameters() for l in lora_layers)),
+        [p for p in unet.parameters() if p.requires_grad],
         lr=cfg["learning_rate"],
     )
 
@@ -179,10 +181,7 @@ def main():
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         os.makedirs(cfg["output_dir"], exist_ok=True)
-        torch.save(
-            {f"lora_{i}": l.state_dict() for i, l in enumerate(lora_layers)},
-            os.path.join(cfg["output_dir"], "sdxl_lora.pt"),
-        )
+        unet.save_attn_procs(cfg["output_dir"])
 
     accelerator.end_training()
 
