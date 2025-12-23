@@ -17,5 +17,5 @@ checkpointing_steps: 200
 
 rank: 8
 
-mixed_precision: fp16
+mixed_precision: bf16
 seed: 42
