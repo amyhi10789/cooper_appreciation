@@ -122,7 +122,10 @@ def main():
         pin_memory=True,
     )
 
-    dataloader, optimizer, unet = accelerator.prepare(dataloader, optimizer, unet)
+    dataloader, optimizer, unet, vae, text_encoder_1, text_encoder_2 = accelerator.prepare(
+        dataloader, optimizer, unet, vae, text_encoder_1, text_encoder_2
+    )
+
 
     unet.train()
     global_step = 0
@@ -132,11 +135,13 @@ def main():
     for epoch in range(int(cfg.get("num_epochs", 1000))):
         for batch in dataloader:
             with accelerator.accumulate(unet):
-                pixel_values = batch["pixel_values"].to(device=device, dtype=vae.dtype)
+                pixel_values = batch["pixel_values"].to(device)
 
                 with torch.no_grad():
-                    latents = vae.encode(pixel_values).latent_dist.sample()
-                    latents = latents * vae.config.scaling_factor
+                    with accelerator.autocast():
+                        latents = vae.encode(pixel_values).latent_dist.sample()
+                        latents = latents * vae.config.scaling_factor
+
 
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
@@ -171,8 +176,9 @@ def main():
                 with torch.no_grad():
                     encoder_hidden_states = text_encoder_1(input_ids_1)[0]
 
-                    out2 = text_encoder_2(input_ids_2, return_dict=True)
-                    pooled_text_embeds = out2.text_embeds
+                    out2 = text_encoder_2(input_ids_2, output_hidden_states=True, return_dict=True)
+                    pooled_text_embeds = out2[0][:, 0]
+
 
 
 
