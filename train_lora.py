@@ -10,7 +10,7 @@ from accelerate import Accelerator
 from torchvision import transforms
 
 from diffusers import StableDiffusionXLPipeline, DDPMScheduler
-from peft import LoraConfig
+from peft import LoraConfig # type: ignore
 
 class ImageTextDataset(Dataset):
     def __init__(self, image_dir, prompt, resolution=1024):
@@ -244,7 +244,7 @@ def main():
 
         unet_to_save = accelerator.unwrap_model(unet)
 
-        unet_to_save.save_lora_weights(outdir)
+        unet_to_save.save_attn_procs(outdir)
 
         with open(os.path.join(outdir, "lora_info.txt"), "w") as f:
             f.write(f"base_model: {cfg['model_name_or_path']}\n")
