@@ -71,6 +71,13 @@ def main():
     pipe.text_encoder.requires_grad_(False)
     pipe.text_encoder_2.requires_grad_(False)
     pipe.unet.requires_grad_(False)
+    
+    # --- FIX 1: Ensure VAE is in FP32 and evaluation mode for stability ---
+    # The VAE is highly sensitive to FP16 and can lead to NaNs, causing the error.
+    if accelerator.mixed_precision == "fp16":
+        pipe.vae.to(torch.float32)
+    pipe.vae.eval()
+    # ---------------------------------------------------------------------
 
     # -------------------------------------------------
     # Add LoRA (CORRECT WAY)
@@ -114,6 +121,8 @@ def main():
         shuffle=True,
     )
 
+    # Note: We only prepare dataloader and optimizer, the VAE is explicitly excluded
+    # from the UNet's accumulation context below.
     dataloader, optimizer = accelerator.prepare(dataloader, optimizer)
 
     pipe.unet.train()
@@ -129,10 +138,19 @@ def main():
                 prompts = batch["prompt"]
 
                 # Encode images → latents
-                latents = pipe.vae.encode(pixel_values).latent_dist.sample()
+                # The VAE expects FP32 input, so we ensure the image data is in FP32
+                with torch.no_grad():
+                    latents = pipe.vae.encode(pixel_values.to(torch.float32)).latent_dist.sample()
+                
                 latents = latents * pipe.vae.config.scaling_factor
 
-                noise = torch.randn_like(latents)
+                # --- FIX 2: Ensure latents match the noise/UNet precision (usually FP16) ---
+                noise = torch.randn_like(latents).to(latents.dtype) 
+                # -------------------------------------------------------------------------
+                
+                # Use the noise tensor's dtype for the latents and noise to ensure consistency
+                latents = latents.to(noise.dtype)
+
                 timesteps = torch.randint(
                     0,
                     pipe.scheduler.config.num_train_timesteps,
@@ -152,9 +170,17 @@ def main():
                     do_classifier_free_guidance=False,
                 )
 
-                pooled_text_embeds = out2.last_hidden_state.mean(dim=1)
+                pooled_prompt_embeds = out2.last_hidden_state.mean(dim=1) # CORRECTED variable name
 
-
+                # Fix: add_time_ids initialization was missing (or outside the scope)
+                # SDXL requires an additional time conditioning vector (original image size, crop, etc.)
+                original_size = (cfg["resolution"], cfg["resolution"]) if "resolution" in cfg else (1024, 1024)
+                crops_coords_top_left = (0, 0)
+                target_size = (cfg["resolution"], cfg["resolution"]) if "resolution" in cfg else (1024, 1024)
+                add_time_ids = pipe._get_add_time_ids(
+                    original_size, crops_coords_top_left, target_size, dtype=prompt_embeds.dtype
+                )
+                
                 add_time_ids = add_time_ids.repeat(latents.shape[0], 1).to(device)
                 # Make sure it matches batch size
                 if add_time_ids.dim() == 1:
@@ -162,6 +188,7 @@ def main():
 
 
                 # -------- UNET --------
+                # The UNet call will automatically use FP16 due to Accelerator
                 noise_pred = pipe.unet(
                     noisy_latents,
                     timesteps,
