@@ -170,8 +170,9 @@ def main():
                 with torch.no_grad():
                     encoder_hidden_states = text_encoder_1(input_ids_1)[0]
 
-                    out2 = text_encoder_2(input_ids_2)
-                    pooled_text_embeds = out2[1]
+                    out2 = text_encoder_2(input_ids_2, output_hidden_states=False, return_dict=True)
+                    pooled_text_embeds = out2.pooler_output
+
 
                 time_ids = torch.tensor(
                     [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
