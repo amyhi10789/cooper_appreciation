@@ -6,9 +6,11 @@ TOKEN = "cooper_person"
 
 pipe = StableDiffusionXLPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0",
-    torch_dtype=torch.float16
+    torch_dtype=torch.float16,
+    variant="fp16"
 ).to("cuda")
 
+pipe.enable_model_cpu_offload()
 pipe.load_lora_weights(LORA_PATH)
 
 def build_prompt(user_prompt: str) -> str:
