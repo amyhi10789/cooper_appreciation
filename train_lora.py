@@ -6,10 +6,9 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from accelerate import Accelerator
 
-from diffusers import StableDiffusionXLPipeline
-from diffusers.models.lora import LoRALinearLayer
+from diffusers import StableDiffusionXLPipeline, LoRALinearLayer
 from transformers import CLIPTokenizer, CLIPTextModel
-from peft import get_peft_model, LoraConfig, TaskType
+from peft import LoraConfig
 
 # -------------------------------
 # Dataset
@@ -77,10 +76,12 @@ def main():
     # -------------------------------
     # Apply LoRA
     # -------------------------------
+    lora_layers = []
     for name, module in unet.named_modules():
         if isinstance(module, torch.nn.Linear):
             lora = LoRALinearLayer(module.in_features, module.out_features, rank=cfg["rank"]).to(device)
             module.forward = lora.forward  # ✅ correct LoRA attachment
+            lora_layers.append(lora)
 
     # -------------------------------
     # Dataset and DataLoader
@@ -93,8 +94,10 @@ def main():
     dataloader = DataLoader(dataset, batch_size=cfg["train_batch_size"], shuffle=True)
 
     # Optimizer
-    lora_layers = [m for m in unet.modules() if isinstance(m, LoRALinearLayer)]
-    optimizer = torch.optim.AdamW(itertools.chain(*(l.parameters() for l in lora_layers)), lr=cfg["learning_rate"])
+    optimizer = torch.optim.AdamW(
+        itertools.chain(*(l.parameters() for l in lora_layers)),
+        lr=cfg["learning_rate"]
+    )
 
     # Prepare accelerator
     dataloader, optimizer = accelerator.prepare(dataloader, optimizer)
