@@ -18,15 +18,13 @@ class ImageTextDataset(Dataset):
         self.prompt = prompt
         self.resolution = resolution
 
-        self.transform = transforms.Compose([
+        self.transform = transforms.Compose(
+            [
                 transforms.Resize((resolution, resolution)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(0.4, 0.4, 0.4, 0.2),
-                transforms.GaussianBlur(kernel_size = 3, sigma = (0.1, 0.5)),
-                transforms.RandomGrayscale(p=0.3),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ])
+            ]
+        )
 
         self.images = [
             f for f in os.listdir(image_dir)
@@ -55,13 +53,7 @@ def main():
     accelerator = Accelerator(mixed_precision=mixed_precision, gradient_accumulation_steps=grad_accum)
     device = accelerator.device
 
-    if mixed_precision == "fp16":
-        weight_dtype = torch.float16
-    elif mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
-    else:
-        weight_dtype = torch.float32
-
+    weight_dtype = torch.float16 if mixed_precision == "fp16" else torch.float32
 
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
@@ -146,8 +138,9 @@ def main():
                 pixel_values = batch["pixel_values"].to(device)
 
                 with torch.no_grad():
-                    latents = vae.encode(pixel_values).latent_dist.sample()
-                    latents = latents * vae.config.scaling_factor
+                    with accelerator.autocast():
+                        latents = vae.encode(pixel_values).latent_dist.sample()
+                        latents = latents * vae.config.scaling_factor
 
 
                 noise = torch.randn_like(latents)
@@ -182,20 +175,18 @@ def main():
 
                 with torch.no_grad():
                     with torch.no_grad():
-                        enc1 = text_encoder_1(
-                            input_ids_1, return_dict=True
-                        ).last_hidden_state
+                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
+                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
+                        enc2 = enc2_out.last_hidden_state
 
-                        enc2 = text_encoder_2(
-                            input_ids_2, return_dict=True
-                        ).last_hidden_state
-
-                    encoder_hidden_states = torch.cat([enc1, enc2], dim=-1)
+                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1) 
+                        pooled_text_embeds = enc2[:, 0, :]         
 
 
-                    pooled_text_embeds = text_encoder_2(
-                        input_ids_2, return_dict=True
-                    ).last_hidden_state[:, 0]
+                    out2 = text_encoder_2(input_ids_2, output_hidden_states=True, return_dict=True)
+
+                    if pooled_text_embeds.dim() == 1:
+                        pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
 
                 time_ids = torch.tensor(
                     [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
@@ -244,7 +235,7 @@ def main():
 
         unet_to_save = accelerator.unwrap_model(unet)
 
-        unet_to_save.save_pretrained(outdir)
+        unet_to_save.save_lora_weights(outdir)
 
         with open(os.path.join(outdir, "lora_info.txt"), "w") as f:
             f.write(f"base_model: {cfg['model_name_or_path']}\n")
@@ -257,6 +248,7 @@ def main():
         print(f"Saved LoRA weights to: {outdir}")
 
     accelerator.end_training()
+
 
 if __name__ == "__main__":
     main()
