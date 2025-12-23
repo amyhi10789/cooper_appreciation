@@ -1,11 +1,9 @@
 import os
-import itertools
 import yaml
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-
 from accelerate import Accelerator
 from torchvision import transforms
 
@@ -40,10 +38,14 @@ class ImageTextDataset(Dataset):
         path = os.path.join(self.image_dir, self.images[idx])
         image = Image.open(path).convert("RGB")
         return {
-            "pixel_values": self.transform(image),
+            "pixel_values": image,
             "prompt": self.prompt,
         }
 
+
+# -------------------------------------------------
+# Training
+# -------------------------------------------------
 def main():
     with open("config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
@@ -204,7 +206,7 @@ def main():
                 model_pred = unet(
                     noisy_latents,
                     timesteps,
-                    encoder_hidden_states,
+                    encoder_hidden_states=prompt_embeds,
                     added_cond_kwargs={
                         "text_embeds": pooled_text_embeds,
                         "time_ids": time_ids,
@@ -235,7 +237,9 @@ def main():
         if global_step >= max_train_steps:
             break
 
-    accelerator.wait_for_everyone()
+    # -------------------------------------------------
+    # Save LoRA
+    # -------------------------------------------------
     if accelerator.is_main_process:
         outdir = cfg["output_dir"]
         os.makedirs(outdir, exist_ok=True)
@@ -257,5 +261,6 @@ def main():
     accelerator.end_training()
 
 
+# -------------------------------------------------
 if __name__ == "__main__":
     main()
