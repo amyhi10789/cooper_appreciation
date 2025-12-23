@@ -174,13 +174,26 @@ def main():
                 ).input_ids.to(device)
 
                 with torch.no_grad():
-                    encoder_hidden_states = text_encoder_1(input_ids_1)[0]
+                    with torch.no_grad():
+                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
+                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
+                        enc2 = enc2_out.last_hidden_state
+
+                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1) 
+                        pooled_text_embeds = enc2[:, 0, :]         
+
 
                     out2 = text_encoder_2(input_ids_2, output_hidden_states=True, return_dict=True)
-                    pooled_text_embeds = out2[0][:, 0]
+                    with torch.no_grad():
+                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
+                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
+                        enc2 = enc2_out.last_hidden_state
 
+                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1)
+                        pooled_text_embeds = enc2[:, 0, :]
 
-
+                    if pooled_text_embeds.dim() == 1:
+                        pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
 
                 time_ids = torch.tensor(
                     [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
