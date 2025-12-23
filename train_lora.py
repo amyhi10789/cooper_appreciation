@@ -145,12 +145,15 @@ def main():
                 )
 
                 # -------- SDXL PROMPT ENCODING (CORRECT) --------
-                prompt_embeds, pooled_prompt_embeds = pipe.encode_prompt(
+                prompt_embeds, out2 = pipe.encode_prompt(
                     prompts,
                     device=device,
                     num_images_per_prompt=1,
                     do_classifier_free_guidance=False,
                 )
+
+                pooled_text_embeds = out2.last_hidden_state.mean(dim=1)
+
 
                 add_time_ids = pipe._get_add_time_ids(
                     original_size=(1024, 1024),
