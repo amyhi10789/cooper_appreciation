@@ -103,6 +103,15 @@ def main():
     )
     unet.add_adapter(lora_config)
 
+    resume_from_lora = cfg.get("resume_from_lora", False)
+    resume_lora_path = cfg.get("resume_lora_path", None)
+
+    if resume_from_lora and resume_lora_path and os.path.isdir(resume_lora_path):
+        print(f"Loading LoRA weights from: {resume_lora_path}")
+        unet.load_attn_procs(resume_lora_path)
+    else:
+        print("No LoRA checkpoint found — training from base model")
+
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
     if len(trainable_params) == 0:
         raise RuntimeError("No trainable params found. LoRA may not have attached correctly.")
