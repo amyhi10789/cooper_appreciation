@@ -22,10 +22,9 @@ pipe.load_lora_weights(LORA_PATH)
 
 def build_prompt(user_prompt: str) -> str:
     base = (
-        f"a high quality photo of {TOKEN}, {TOKEN}, "
-        "a real person, realistic facial proportions, "
-        "natural skin texture, candid photograph, "
-        "35mm photography, realistic indoor lighting"
+        f"a photo of {TOKEN}, "
+        "realistic face, natural skin texture, "
+        "candid photograph, 35mm photo"
     )
 
     user_prompt_lower = user_prompt.lower()
