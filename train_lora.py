@@ -57,9 +57,10 @@ def main():
 
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
-        dtype=weight_dtype,
+        torch_dtype=weight_dtype,
         use_safetensors=True,
-    ).to(device)
+    )
+
 
     noise_scheduler = DDPMScheduler.from_pretrained(cfg["model_name_or_path"], subfolder="scheduler")
 
@@ -170,8 +171,9 @@ def main():
                 with torch.no_grad():
                     encoder_hidden_states = text_encoder_1(input_ids_1)[0]
 
-                    out2 = text_encoder_2(input_ids_2, output_hidden_states=False, return_dict=True)
-                    pooled_text_embeds = out2.pooler_output
+                    out2 = text_encoder_2(input_ids_2, return_dict=True)
+                    pooled_text_embeds = out2.text_embeds
+
 
 
                 time_ids = torch.tensor(
