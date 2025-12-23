@@ -140,9 +140,8 @@ def main():
                 pixel_values = batch["pixel_values"].to(device)
 
                 with torch.no_grad():
-                    with accelerator.autocast():
-                        latents = vae.encode(pixel_values).latent_dist.sample()
-                        latents = latents * vae.config.scaling_factor
+                    latents = vae.encode(pixel_values).latent_dist.sample()
+                    latents = latents * vae.config.scaling_factor
 
 
                 noise = torch.randn_like(latents)
@@ -176,26 +175,13 @@ def main():
                 ).input_ids.to(device)
 
                 with torch.no_grad():
-                    with torch.no_grad():
-                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
-                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
-                        enc2 = enc2_out.last_hidden_state
+                    encoder_hidden_states = text_encoder_1(
+                        input_ids_1, return_dict=True
+                    ).last_hidden_state
 
-                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1) 
-                        pooled_text_embeds = enc2[:, 0, :]         
-
-
-                    out2 = text_encoder_2(input_ids_2, output_hidden_states=True, return_dict=True)
-                    with torch.no_grad():
-                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
-                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
-                        enc2 = enc2_out.last_hidden_state
-
-                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1)
-                        pooled_text_embeds = enc2[:, 0, :]
-
-                    if pooled_text_embeds.dim() == 1:
-                        pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
+                    pooled_text_embeds = text_encoder_2(
+                        input_ids_2, return_dict=True
+                    ).last_hidden_state[:, 0]
 
                 time_ids = torch.tensor(
                     [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
@@ -230,11 +216,6 @@ def main():
 
             if accelerator.is_main_process and global_step % log_every == 0:
                 print(f"Step {global_step}/{max_train_steps} | Loss {loss.item():.4f}")
-                torch.save({
-                    'epoch': global_step,
-                    'model_state_dict': unet.state_dict(),
-                    'loss': loss.item()
-                }, outdir)
 
             if global_step >= max_train_steps:
                 break
@@ -249,7 +230,7 @@ def main():
 
         unet_to_save = accelerator.unwrap_model(unet)
 
-        unet_to_save.save_attn_procs(outdir)
+        unet_to_save.save_pretrained(outdir)
 
         with open(os.path.join(outdir, "lora_info.txt"), "w") as f:
             f.write(f"base_model: {cfg['model_name_or_path']}\n")
@@ -262,7 +243,6 @@ def main():
         print(f"Saved LoRA weights to: {outdir}")
 
     accelerator.end_training()
-
 
 if __name__ == "__main__":
     main()
