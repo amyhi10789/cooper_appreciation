@@ -14,12 +14,12 @@ pipe.enable_model_cpu_offload()
 pipe.load_lora_weights(LORA_PATH)
 
 def build_prompt(user_prompt: str) -> str:
-    if "untitled" in user_prompt.lower():
-        return f"{user_prompt}, detailed portrait of {TOKEN}, studio lighting"
+    if "cooper" in user_prompt.lower():
+        return f"{user_prompt}, detailed portrait of {TOKEN}, in color"
     else:
         return (
-            f"{user_prompt}, wide panoramic shot, "
-            f"{TOKEN} as a small figure in the far background"
+            f"{user_prompt}, with"
+            f"{TOKEN} as a small figure in the far background, all in color"
         )
 
 if __name__ == "__main__":
