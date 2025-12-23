@@ -15,11 +15,15 @@ pipe.load_lora_weights(LORA_PATH)
 
 def build_prompt(user_prompt: str) -> str:
     if "cooper" in user_prompt.lower():
-        return f"{user_prompt}, detailed portrait of {TOKEN}, in color that is not dull"
+        return (
+            f"{user_prompt}, make sure the person asked by the user is {TOKEN}, in color"
+            "make sure the image does not look AI-generated"
+        )
     else:
         return (
             f"{user_prompt}, with"
-            f"{TOKEN} as a visible figure in the background, all in color that is not dull"
+            f"{TOKEN} as a visible figure in the background, all in color"
+            "make sure the image does not look AI-generated"
         )
 
 if __name__ == "__main__":
