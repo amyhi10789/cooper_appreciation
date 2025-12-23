@@ -222,6 +222,13 @@ def main():
 
             if accelerator.is_main_process and global_step % log_every == 0:
                 print(f"Step {global_step}/{max_train_steps} | Loss {loss.item():.4f}")
+                ckpt_dir = os.path.join(cfg["output_dir"], f"checkpoint-{global_step}")
+                os.makedirs(ckpt_dir, exist_ok=True)
+
+                unet_to_save = accelerator.unwrap_model(unet)
+                unet_to_save.save_attn_procs(ckpt_dir)
+
+                print(f"Saved LoRA checkpoint to {ckpt_dir}")
 
             if global_step >= max_train_steps:
                 break
