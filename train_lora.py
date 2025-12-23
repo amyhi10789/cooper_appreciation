@@ -106,7 +106,7 @@ def main():
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
 
-    if resume_from_lora and resume_lora_path and os.path.isdir(resume_lora_path):
+    if resume_from_lora and resume_lora_path and os.path.exists(resume_lora_path):
         print(f"Loading LoRA weights from: {resume_lora_path}")
         unet.load_attn_procs(resume_lora_path)
     else:
@@ -238,7 +238,7 @@ def main():
                 os.makedirs(ckpt_dir, exist_ok=True)
 
                 unet_to_save = accelerator.unwrap_model(unet)
-                unet_to_save.save_attn_procs(ckpt_dir)
+                unet_to_save.save_lora_adapter(ckpt_dir)
 
                 print(f"Saved LoRA checkpoint to {ckpt_dir}")
 
