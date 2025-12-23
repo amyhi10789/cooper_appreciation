@@ -155,15 +155,11 @@ def main():
                 pooled_text_embeds = out2.last_hidden_state.mean(dim=1)
 
 
-                add_time_ids = pipe._get_add_time_ids(
-                    original_size=(1024, 1024),
-                    crop_coords_top_left=(0, 0),
-                    target_size=(1024, 1024),
-                    dtype=prompt_embeds.dtype,
-                )
-                add_time_ids = add_time_ids.repeat(
-                    latents.shape[0], 1
-                ).to(device)
+                add_time_ids = add_time_ids.repeat(latents.shape[0], 1).to(device)
+                # Make sure it matches batch size
+                if add_time_ids.dim() == 1:
+                    add_time_ids = add_time_ids.unsqueeze(0).repeat(latents.shape[0], 1)
+
 
                 # -------- UNET --------
                 noise_pred = pipe.unet(
