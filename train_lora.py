@@ -155,8 +155,8 @@ def main():
                     timesteps,
                     encoder_hidden_states=prompt_embeds,
                     added_cond_kwargs={
-                        "text_embeds": pooled_prompt_embeds,
-                        "time_ids": add_time_ids,
+                        "text_embeds": pooled_prompt_embeds,  # [B, 1280]
+                        "time_ids": add_time_ids,              # [B, 6]
                     },
                 ).sample
 
