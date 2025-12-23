@@ -10,7 +10,7 @@ from accelerate import Accelerator
 from torchvision import transforms
 
 from diffusers import StableDiffusionXLPipeline, DDPMScheduler
-from peft import LoraConfig # type: ignore
+from peft import LoraConfig
 
 class ImageTextDataset(Dataset):
     def __init__(self, image_dir, prompt, resolution=1024):
@@ -55,7 +55,13 @@ def main():
     accelerator = Accelerator(mixed_precision=mixed_precision, gradient_accumulation_steps=grad_accum)
     device = accelerator.device
 
-    weight_dtype = torch.float16 if mixed_precision == "fp16" else torch.float32
+    if mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+    else:
+        weight_dtype = torch.float32
+
 
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
@@ -175,9 +181,17 @@ def main():
                 ).input_ids.to(device)
 
                 with torch.no_grad():
-                    encoder_hidden_states = text_encoder_1(
-                        input_ids_1, return_dict=True
-                    ).last_hidden_state
+                    with torch.no_grad():
+                        enc1 = text_encoder_1(
+                            input_ids_1, return_dict=True
+                        ).last_hidden_state
+
+                        enc2 = text_encoder_2(
+                            input_ids_2, return_dict=True
+                        ).last_hidden_state
+
+                    encoder_hidden_states = torch.cat([enc1, enc2], dim=-1)
+
 
                     pooled_text_embeds = text_encoder_2(
                         input_ids_2, return_dict=True
