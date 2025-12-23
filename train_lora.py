@@ -1,46 +1,42 @@
 import os
 import yaml
 import torch
-import itertools
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from accelerate import Accelerator
+from torchvision import transforms
 
-from diffusers import StableDiffusionXLPipeline
-from diffusers.optimization import get_scheduler
-from diffusers.models.lora import LoraConfig
+from diffusers import StableDiffusionXLPipeline, DDPMScheduler
+from peft import LoraConfig
 
-
-# -------------------------------------------------
-# Dataset
-# -------------------------------------------------
 class ImageTextDataset(Dataset):
     def __init__(self, image_dir, prompt, resolution=1024):
         self.image_dir = image_dir
         self.prompt = prompt
         self.resolution = resolution
+
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize((resolution, resolution)),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ]
+        )
+
         self.images = [
             f for f in os.listdir(image_dir)
             if f.lower().endswith((".png", ".jpg", ".jpeg"))
         ]
+        if len(self.images) == 0:
+            raise ValueError(f"No images found in {image_dir}")
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        image = Image.open(
-            os.path.join(self.image_dir, self.images[idx])
-        ).convert("RGB")
-
-        image = image.resize((self.resolution, self.resolution))
-
-        image = torch.tensor(
-            (torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes()))
-             .float()
-             .view(self.resolution, self.resolution, 3)
-             / 255.0)
-        ).permute(2, 0, 1)
-
+        path = os.path.join(self.image_dir, self.images[idx])
+        image = Image.open(path).convert("RGB")
         return {
             "pixel_values": image,
             "prompt": self.prompt,
@@ -54,174 +50,213 @@ def main():
     with open("config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
 
-    accelerator = Accelerator(mixed_precision="fp16")
+    mixed_precision = cfg.get("mixed_precision", "fp16")
+    grad_accum = int(cfg.get("gradient_accumulation_steps", 1))
+    accelerator = Accelerator(mixed_precision=mixed_precision, gradient_accumulation_steps=grad_accum)
     device = accelerator.device
 
-    # -------------------------------------------------
-    # Load SDXL
-    # -------------------------------------------------
+    weight_dtype = torch.float16 if mixed_precision == "fp16" else torch.float32
+
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
-        torch_dtype=torch.float16,
+        torch_dtype=weight_dtype,
         use_safetensors=True,
     )
 
-    pipe.to(device)
-    pipe.vae.requires_grad_(False)
-    pipe.text_encoder.requires_grad_(False)
-    pipe.text_encoder_2.requires_grad_(False)
-    pipe.unet.requires_grad_(False)
-    
-    # --- FIX 1: Ensure VAE is in FP32 and evaluation mode for stability ---
-    # The VAE is highly sensitive to FP16 and can lead to NaNs, causing the error.
-    if accelerator.mixed_precision == "fp16":
-        pipe.vae.to(torch.float32)
-    pipe.vae.eval()
-    # ---------------------------------------------------------------------
 
-    # -------------------------------------------------
-    # Add LoRA (CORRECT WAY)
-    # -------------------------------------------------
+    noise_scheduler = DDPMScheduler.from_pretrained(cfg["model_name_or_path"], subfolder="scheduler")
+
+    if torch.cuda.is_available():
+        try:
+            pipe.enable_xformers_memory_efficient_attention()
+        except Exception:
+            pass
+
+    unet = pipe.unet
+    vae = pipe.vae
+    text_encoder_1 = pipe.text_encoder
+    text_encoder_2 = pipe.text_encoder_2
+    tokenizer_1 = pipe.tokenizer
+    tokenizer_2 = pipe.tokenizer_2
+
+    for p in itertools.chain(
+        unet.parameters(),
+        vae.parameters(),
+        text_encoder_1.parameters(),
+        text_encoder_2.parameters(),
+    ):
+        p.requires_grad_(False)
+
+    rank = int(cfg["rank"])
     lora_config = LoraConfig(
-        r=cfg["rank"],
-        lora_alpha=cfg["rank"],
-        target_modules=[
-            "to_q", "to_k", "to_v", "to_out.0",
-            "proj_in", "proj_out",
-            "ff.net.0.proj", "ff.net.2",
-        ],
-        lora_dropout=0.0,
+        r=rank,
+        lora_alpha=int(cfg.get("lora_alpha", rank)),
+        lora_dropout=float(cfg.get("lora_dropout", 0.0)),
         bias="none",
-        task_type="UNET",
+        target_modules=["to_q", "to_k", "to_v", "to_out.0"],
     )
+    unet.add_adapter(lora_config)
 
-    pipe.unet.add_adapter(lora_config)
-
-    # Train only LoRA params
-    trainable_params = [
-        p for p in pipe.unet.parameters() if p.requires_grad
-    ]
+    trainable_params = [p for p in unet.parameters() if p.requires_grad]
+    if len(trainable_params) == 0:
+        raise RuntimeError("No trainable params found. LoRA may not have attached correctly.")
 
     optimizer = torch.optim.AdamW(
         trainable_params,
-        lr=cfg["learning_rate"],
+        lr=float(cfg["learning_rate"]),
+        betas=(0.9, 0.999),
+        weight_decay=float(cfg.get("weight_decay", 0.0)),
+        eps=1e-8,
     )
 
-    # -------------------------------------------------
-    # Data
-    # -------------------------------------------------
+    resolution = int(cfg.get("resolution", 1024))
     dataset = ImageTextDataset(
         cfg["instance_data_dir"],
         cfg["instance_prompt"],
+        resolution,
     )
 
     dataloader = DataLoader(
         dataset,
-        batch_size=cfg["train_batch_size"],
+        batch_size=int(cfg["train_batch_size"]),
         shuffle=True,
+        num_workers=int(cfg.get("num_workers", 4)),
+        pin_memory=True,
     )
 
-    # Note: We only prepare dataloader and optimizer, the VAE is explicitly excluded
-    # from the UNet's accumulation context below.
-    dataloader, optimizer = accelerator.prepare(dataloader, optimizer)
+    dataloader, optimizer, unet, vae, text_encoder_1, text_encoder_2 = accelerator.prepare(
+        dataloader, optimizer, unet, vae, text_encoder_1, text_encoder_2
+    )
 
-    pipe.unet.train()
+
+    unet.train()
     global_step = 0
+    max_train_steps = int(cfg["max_train_steps"])
+    log_every = int(cfg.get("log_every", 50))
 
-    # -------------------------------------------------
-    # Training loop
-    # -------------------------------------------------
-    for epoch in range(999999):
+    for epoch in range(int(cfg.get("num_epochs", 1000))):
         for batch in dataloader:
-            with accelerator.accumulate(pipe.unet):
+            with accelerator.accumulate(unet):
                 pixel_values = batch["pixel_values"].to(device)
-                prompts = batch["prompt"]
 
-                # Encode images → latents
-                # The VAE expects FP32 input, so we ensure the image data is in FP32
                 with torch.no_grad():
-                    latents = pipe.vae.encode(pixel_values.to(torch.float32)).latent_dist.sample()
-                
-                latents = latents * pipe.vae.config.scaling_factor
+                    with accelerator.autocast():
+                        latents = vae.encode(pixel_values).latent_dist.sample()
+                        latents = latents * vae.config.scaling_factor
 
-                # --- FIX 2: Ensure latents match the noise/UNet precision (usually FP16) ---
-                noise = torch.randn_like(latents).to(latents.dtype) 
-                # -------------------------------------------------------------------------
-                
-                # Use the noise tensor's dtype for the latents and noise to ensure consistency
-                latents = latents.to(noise.dtype)
 
+                noise = torch.randn_like(latents)
+                bsz = latents.shape[0]
                 timesteps = torch.randint(
                     0,
-                    pipe.scheduler.config.num_train_timesteps,
-                    (latents.shape[0],),
+                    noise_scheduler.config.num_train_timesteps,
+                    (bsz,),
                     device=device,
-                ).long()
-
-                noisy_latents = pipe.scheduler.add_noise(
-                    latents, noise, timesteps
+                    dtype=torch.long,
                 )
 
-                # -------- SDXL PROMPT ENCODING (CORRECT) --------
-                prompt_embeds, out2 = pipe.encode_prompt(
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+                prompts = batch["prompt"]
+                if isinstance(prompts, str):
+                    prompts = [prompts] * bsz
+
+                input_ids_1 = tokenizer_1(
                     prompts,
+                    padding="max_length",
+                    truncation=True,
+                    return_tensors="pt",
+                ).input_ids.to(device)
+
+                input_ids_2 = tokenizer_2(
+                    prompts,
+                    padding="max_length",
+                    truncation=True,
+                    return_tensors="pt",
+                ).input_ids.to(device)
+
+                with torch.no_grad():
+                    with torch.no_grad():
+                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
+                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
+                        enc2 = enc2_out.last_hidden_state
+
+                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1) 
+                        pooled_text_embeds = enc2[:, 0, :]         
+
+
+                    out2 = text_encoder_2(input_ids_2, output_hidden_states=True, return_dict=True)
+                    with torch.no_grad():
+                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
+                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
+                        enc2 = enc2_out.last_hidden_state
+
+                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1)
+                        pooled_text_embeds = enc2[:, 0, :]
+
+                    if pooled_text_embeds.dim() == 1:
+                        pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
+
+                time_ids = torch.tensor(
+                    [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
                     device=device,
-                    num_images_per_prompt=1,
-                    do_classifier_free_guidance=False,
+                    dtype=pooled_text_embeds.dtype,
                 )
 
-                pooled_prompt_embeds = out2.last_hidden_state.mean(dim=1) # CORRECTED variable name
-
-                # Fix: add_time_ids initialization was missing (or outside the scope)
-                # SDXL requires an additional time conditioning vector (original image size, crop, etc.)
-                original_size = (cfg["resolution"], cfg["resolution"]) if "resolution" in cfg else (1024, 1024)
-                crops_coords_top_left = (0, 0)
-                target_size = (cfg["resolution"], cfg["resolution"]) if "resolution" in cfg else (1024, 1024)
-                add_time_ids = pipe._get_add_time_ids(
-                    original_size, crops_coords_top_left, target_size, dtype=prompt_embeds.dtype
-                )
-                
-                add_time_ids = add_time_ids.repeat(latents.shape[0], 1).to(device)
-                # Make sure it matches batch size
-                if add_time_ids.dim() == 1:
-                    add_time_ids = add_time_ids.unsqueeze(0).repeat(latents.shape[0], 1)
-
-
-                # -------- UNET --------
-                # The UNet call will automatically use FP16 due to Accelerator
-                noise_pred = pipe.unet(
+                model_pred = unet(
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states=prompt_embeds,
                     added_cond_kwargs={
-                        "text_embeds": pooled_prompt_embeds,
-                        "time_ids": add_time_ids,
+                        "text_embeds": pooled_text_embeds,
+                        "time_ids": time_ids,
                     },
                 ).sample
 
-                loss = torch.nn.functional.mse_loss(noise_pred, noise)
+                if noise_scheduler.config.prediction_type == "epsilon":
+                    target = noise
+                elif noise_scheduler.config.prediction_type == "v_prediction":
+                    target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                else:
+                    raise ValueError(f"Unknown prediction_type: {noise_scheduler.config.prediction_type}")
+
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 accelerator.backward(loss)
                 optimizer.step()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
 
             global_step += 1
 
-            if accelerator.is_main_process and global_step % 50 == 0:
-                print(f"Step {global_step} | Loss: {loss.item():.4f}")
+            if accelerator.is_main_process and global_step % log_every == 0:
+                print(f"Step {global_step}/{max_train_steps} | Loss {loss.item():.4f}")
 
-            if global_step >= cfg["max_train_steps"]:
+            if global_step >= max_train_steps:
                 break
 
-        if global_step >= cfg["max_train_steps"]:
+        if global_step >= max_train_steps:
             break
 
     # -------------------------------------------------
     # Save LoRA
     # -------------------------------------------------
     if accelerator.is_main_process:
-        os.makedirs(cfg["output_dir"], exist_ok=True)
-        pipe.unet.save_attn_procs(cfg["output_dir"])
+        outdir = cfg["output_dir"]
+        os.makedirs(outdir, exist_ok=True)
+
+        unet_to_save = accelerator.unwrap_model(unet)
+
+        unet_to_save.save_lora_weights(outdir)
+
+        with open(os.path.join(outdir, "lora_info.txt"), "w") as f:
+            f.write(f"base_model: {cfg['model_name_or_path']}\n")
+            f.write(f"rank: {rank}\n")
+            f.write(f"learning_rate: {cfg['learning_rate']}\n")
+            f.write(f"resolution: {resolution}\n")
+            f.write(f"steps: {max_train_steps}\n")
+            f.write(f"prompt: {cfg['instance_prompt']}\n")
+
+        print(f"Saved LoRA weights to: {outdir}")
 
     accelerator.end_training()
 
