@@ -230,6 +230,11 @@ def main():
 
             if accelerator.is_main_process and global_step % log_every == 0:
                 print(f"Step {global_step}/{max_train_steps} | Loss {loss.item():.4f}")
+                torch.save({
+                    'epoch': global_step,
+                    'model_state_dict': unet.state_dict(),
+                    'loss': loss.item()
+                }, outdir)
 
             if global_step >= max_train_steps:
                 break
