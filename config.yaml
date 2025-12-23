@@ -16,7 +16,7 @@ max_train_steps: 800
 checkpointing_steps: 100
 
 resume_from_lora: true
-resume_lora_path: output_dir/cooper_loraq
+resume_lora_path: output/cooper_lora/pytorch_lora_weights.safetensors
 
 rank: 8
 
