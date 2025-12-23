@@ -128,7 +128,7 @@ def main():
     max_train_steps = int(cfg["max_train_steps"])
     log_every = int(cfg.get("log_every", 50))
 
-    for epoch in range(int(cfg.get("num_epochs", 10_000_000))):
+    for epoch in range(int(cfg.get("num_epochs", 1000))):
         for batch in dataloader:
             with accelerator.accumulate(unet):
                 pixel_values = batch["pixel_values"].to(device=device, dtype=vae.dtype)
