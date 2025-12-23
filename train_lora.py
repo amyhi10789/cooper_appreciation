@@ -13,7 +13,7 @@ from diffusers import StableDiffusionXLPipeline, DDPMScheduler
 from peft import LoraConfig
 
 class ImageTextDataset(Dataset):
-    def __init__(self, image_dir, prompt, resolution=1024):
+    def __init__(self, image_dir, prompt, resolution=512):
         self.image_dir = image_dir
         self.prompt = prompt
         self.resolution = resolution
@@ -53,7 +53,12 @@ def main():
     accelerator = Accelerator(mixed_precision=mixed_precision, gradient_accumulation_steps=grad_accum)
     device = accelerator.device
 
-    weight_dtype = torch.float16 if mixed_precision == "fp16" else torch.float32
+    if mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+    else:
+        weight_dtype = torch.float32
 
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
@@ -174,19 +179,15 @@ def main():
                 ).input_ids.to(device)
 
                 with torch.no_grad():
-                    with torch.no_grad():
-                        enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
-                        enc2_out = text_encoder_2(input_ids_2, return_dict=True)
-                        enc2 = enc2_out.last_hidden_state
+                    enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
+                    enc2_out = text_encoder_2(input_ids_2, return_dict=True)
+                    enc2 = enc2_out.last_hidden_state
 
-                        encoder_hidden_states = torch.cat([enc1, enc2], dim=-1) 
-                        pooled_text_embeds = enc2[:, 0, :]         
+                    encoder_hidden_states = torch.cat([enc1, enc2], dim=-1) 
+                    pooled_text_embeds = enc2[:, 0, :]         
 
-
-                    out2 = text_encoder_2(input_ids_2, output_hidden_states=True, return_dict=True)
-
-                    if pooled_text_embeds.dim() == 1:
-                        pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
+                if pooled_text_embeds.dim() == 1:
+                    pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
 
                 time_ids = torch.tensor(
                     [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
