@@ -7,7 +7,9 @@ from PIL import Image
 from accelerate import Accelerator
 
 from diffusers import StableDiffusionXLPipeline
-from diffusers.models.lora import LoRALinearLayer
+from diffusers.optimization import get_scheduler
+from diffusers.models.lora import LoraConfig
+
 
 # -------------------------------------------------
 # Dataset
@@ -30,7 +32,6 @@ class ImageTextDataset(Dataset):
             os.path.join(self.image_dir, self.images[idx])
         ).convert("RGB")
 
-        # SDXL ALWAYS expects 1024x1024
         image = image.resize((self.resolution, self.resolution))
 
         image = torch.tensor(
@@ -45,6 +46,7 @@ class ImageTextDataset(Dataset):
             "prompt": self.prompt,
         }
 
+
 # -------------------------------------------------
 # Training
 # -------------------------------------------------
@@ -55,35 +57,48 @@ def main():
     accelerator = Accelerator(mixed_precision="fp16")
     device = accelerator.device
 
+    # -------------------------------------------------
     # Load SDXL
+    # -------------------------------------------------
     pipe = StableDiffusionXLPipeline.from_pretrained(
         cfg["model_name_or_path"],
         torch_dtype=torch.float16,
         use_safetensors=True,
-    ).to(device)
+    )
 
-    unet = pipe.unet
-    vae = pipe.vae
-
-    # Freeze base model
-    for p in itertools.chain(unet.parameters(), vae.parameters()):
-        p.requires_grad = False
+    pipe.to(device)
+    pipe.vae.requires_grad_(False)
+    pipe.text_encoder.requires_grad_(False)
+    pipe.text_encoder_2.requires_grad_(False)
+    pipe.unet.requires_grad_(False)
 
     # -------------------------------------------------
-    # Apply LoRA (correct way)
+    # Add LoRA (CORRECT WAY)
     # -------------------------------------------------
-    lora_layers = []
+    lora_config = LoraConfig(
+        r=cfg["rank"],
+        lora_alpha=cfg["rank"],
+        target_modules=[
+            "to_q", "to_k", "to_v", "to_out.0",
+            "proj_in", "proj_out",
+            "ff.net.0.proj", "ff.net.2",
+        ],
+        lora_dropout=0.0,
+        bias="none",
+        task_type="UNET",
+    )
 
-    for module in unet.modules():
-        if isinstance(module, torch.nn.Linear):
-            lora = LoRALinearLayer(
-                module.in_features,
-                module.out_features,
-                rank=cfg["rank"],
-            ).to(device)
+    pipe.unet.add_adapter(lora_config)
 
-            module.forward = lora.forward
-            lora_layers.append(lora)
+    # Train only LoRA params
+    trainable_params = [
+        p for p in pipe.unet.parameters() if p.requires_grad
+    ]
+
+    optimizer = torch.optim.AdamW(
+        trainable_params,
+        lr=cfg["learning_rate"],
+    )
 
     # -------------------------------------------------
     # Data
@@ -99,14 +114,9 @@ def main():
         shuffle=True,
     )
 
-    optimizer = torch.optim.AdamW(
-        itertools.chain(*(l.parameters() for l in lora_layers)),
-        lr=cfg["learning_rate"],
-    )
-
     dataloader, optimizer = accelerator.prepare(dataloader, optimizer)
 
-    unet.train()
+    pipe.unet.train()
     global_step = 0
 
     # -------------------------------------------------
@@ -114,13 +124,13 @@ def main():
     # -------------------------------------------------
     for epoch in range(999999):
         for batch in dataloader:
-            with accelerator.accumulate(unet):
+            with accelerator.accumulate(pipe.unet):
                 pixel_values = batch["pixel_values"].to(device)
                 prompts = batch["prompt"]
 
-                # Encode images
-                latents = vae.encode(pixel_values).latent_dist.sample()
-                latents = latents * vae.config.scaling_factor
+                # Encode images → latents
+                latents = pipe.vae.encode(pixel_values).latent_dist.sample()
+                latents = latents * pipe.vae.config.scaling_factor
 
                 noise = torch.randn_like(latents)
                 timesteps = torch.randint(
@@ -134,7 +144,7 @@ def main():
                     latents, noise, timesteps
                 )
 
-                # ---- SDXL CORRECT PROMPT ENCODING ----
+                # -------- SDXL PROMPT ENCODING (CORRECT) --------
                 prompt_embeds, pooled_prompt_embeds = pipe.encode_prompt(
                     prompts,
                     device=device,
@@ -147,16 +157,19 @@ def main():
                     crop_coords_top_left=(0, 0),
                     target_size=(1024, 1024),
                     dtype=prompt_embeds.dtype,
+                )
+                add_time_ids = add_time_ids.repeat(
+                    latents.shape[0], 1
                 ).to(device)
 
-                # ---- SDXL CORRECT UNET CALL ----
-                noise_pred = unet(
+                # -------- UNET --------
+                noise_pred = pipe.unet(
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states=prompt_embeds,
                     added_cond_kwargs={
-                        "text_embeds": pooled_prompt_embeds,  # [B, 1280]
-                        "time_ids": add_time_ids,              # [B, 6]
+                        "text_embeds": pooled_prompt_embeds,
+                        "time_ids": add_time_ids,
                     },
                 ).sample
 
@@ -167,6 +180,7 @@ def main():
                 optimizer.zero_grad()
 
             global_step += 1
+
             if accelerator.is_main_process and global_step % 50 == 0:
                 print(f"Step {global_step} | Loss: {loss.item():.4f}")
 
@@ -181,12 +195,10 @@ def main():
     # -------------------------------------------------
     if accelerator.is_main_process:
         os.makedirs(cfg["output_dir"], exist_ok=True)
-        torch.save(
-            {f"lora_{i}": l.state_dict() for i, l in enumerate(lora_layers)},
-            os.path.join(cfg["output_dir"], "sdxl_lora.safetensors"),
-        )
+        pipe.unet.save_attn_procs(cfg["output_dir"])
 
     accelerator.end_training()
+
 
 # -------------------------------------------------
 if __name__ == "__main__":
