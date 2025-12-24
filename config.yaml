@@ -17,8 +17,8 @@ rank: 32
 lora_alpha: 32
 lora_dropout: 0.05
 
-resume_from_lora: false
-#resume_lora_path: output/cooper_lora/checkpoint-300
+resume_from_lora: true
+resume_lora_path: output/cooper_lora/checkpoint-300
 
 mixed_precision: bf16
 seed: 42
