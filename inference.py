@@ -14,14 +14,14 @@ pipe.load_lora_weights(LORA_PATH)
 generator = torch.Generator("cuda").manual_seed(1234)
 
 prompt = (
-    f"photo of {TOKEN}, adult man, head and shoulders portrait, "
+    f"realistic photo of {TOKEN}, adult man, head and shoulders portrait, "
     "neutral expression, facing camera"
 )
 
 negative_prompt = (
     "child, teenager, young boy, female, soft face, "
-    "sketch, drawing, illustration, painting, line art, "
-    "paper texture, text, watermark"
+    "sketch, drawing, illustration, painting, line art"
+    "paper texture, text, watermark, waxy, glossy, smooth skin"
 )
 
 image = pipe(
