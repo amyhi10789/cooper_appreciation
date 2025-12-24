@@ -112,7 +112,7 @@ def main():
     text_encoder_2.eval()
 
     rank = int(cfg["rank"])
-    
+
     lora_config = LoraConfig(
         r=rank,
         lora_alpha=int(cfg.get("lora_alpha", rank)),
@@ -123,6 +123,8 @@ def main():
         ],
     )
 
+    unet.add_adapter(lora_config)
+
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
 
@@ -131,15 +133,8 @@ def main():
         unet.load_attn_procs(resume_lora_path)
     else:
         print("No LoRA checkpoint found — training from base model")
-        unet.add_adapter(lora_config)
 
-
-    trainable_params = itertools.chain(
-        unet.parameters(),
-        text_encoder_1.parameters(),
-        text_encoder_2.parameters(),
-    )
-    trainable_params = [p for p in trainable_params if p.requires_grad]
+    trainable_params = [p for p in unet.parameters() if p.requires_grad]
 
     print("Trainable params:", sum(p.numel() for p in trainable_params))
     print("Trainable tensors:", sum(1 for p in trainable_params))
@@ -172,12 +167,12 @@ def main():
         drop_last=True,
     )
 
-    dataloader, optimizer, unet, text_encoder_1, text_encoder_2 = accelerator.prepare(
-        dataloader, optimizer, unet, text_encoder_1, text_encoder_2
-    )
+    dataloader, optimizer, unet = accelerator.prepare(dataloader, optimizer, unet)
 
-    # Move VAE manually since it's frozen and not in the list above
     vae.to(device)
+    text_encoder_1.to(device)
+    text_encoder_2.to(device)
+
 
     unet.train()
     global_step = 0
