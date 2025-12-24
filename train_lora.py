@@ -245,6 +245,7 @@ def main():
                     if pooled_text_embeds is None:
                         pooled_text_embeds = enc2[:, 0, :]
 
+                pooled_text_embeds = pooled_text_embeds.to(device)
                         
                 if pooled_text_embeds.dim() == 1:
                     pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
