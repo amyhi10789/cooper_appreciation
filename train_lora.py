@@ -131,7 +131,7 @@ def main():
     if resume_from_lora and resume_lora_path and os.path.exists(resume_lora_path):
         print(f"Loading LoRA weights from: {resume_lora_path}")
 
-        unet.load_attn_procs(resume_lora_path, adapter_name=ADAPTER_NAME)
+        unet.load_lora_adapter(resume_lora_path, adapter_name=ADAPTER_NAME)
         unet.set_adapter(ADAPTER_NAME)
 
     else:
@@ -298,7 +298,7 @@ def main():
                 os.makedirs(ckpt_dir, exist_ok=True)
 
                 unet_to_save = accelerator.unwrap_model(unet)
-                unet_to_save.save_attn_procs(ckpt_dir, adapter_name=ADAPTER_NAME)
+                unet_to_save.save_lora_adapter(ckpt_dir, adapter_name=ADAPTER_NAME)
 
 
             if global_step >= max_train_steps:
@@ -314,7 +314,7 @@ def main():
 
         unet_to_save = accelerator.unwrap_model(unet)
 
-        unet_to_save.save_attn_procs(outdir, adapter_name=ADAPTER_NAME)
+        unet_to_save.save_lora_adapter(outdir, adapter_name=ADAPTER_NAME)
 
         with open(os.path.join(outdir, "lora_info.txt"), "w") as f:
             f.write(f"base_model: {cfg['model_name_or_path']}\n")
