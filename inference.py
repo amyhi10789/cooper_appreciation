@@ -19,6 +19,7 @@ pipe = StableDiffusionXLPipeline.from_pretrained(
 
 pipe.enable_model_cpu_offload()
 pipe.load_lora_weights(LORA_PATH)
+pipe.set_adapters(["default"], adapter_weights=[2.0])
 
 def build_prompt(user_prompt: str) -> str:
     base = (

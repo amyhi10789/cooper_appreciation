@@ -112,6 +112,10 @@ def main():
     else:
         print("No LoRA checkpoint found — training from base model")
 
+    print("Trainable params:", sum(p.numel() for p in unet.parameters() if p.requires_grad))
+
+    print("Trainable tensors:", sum(1 for p in unet.parameters() if p.requires_grad))
+
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
     if len(trainable_params) == 0:
         raise RuntimeError("No trainable params found. LoRA may not have attached correctly.")
