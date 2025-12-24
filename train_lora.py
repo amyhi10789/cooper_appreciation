@@ -156,17 +156,14 @@ def main():
         )
         unet.set_adapter(ADAPTER_NAME)
 
+    trainable_params = [p for p in unet.parameters() if p.requires_grad]
 
+    print("Trainable params:", sum(p.numel() for p in trainable_params))
+    print("Trainable tensors:", sum(1 for p in trainable_params))
 
-
-        trainable_params = [p for p in unet.parameters() if p.requires_grad]
-
-        print("Trainable params:", sum(p.numel() for p in trainable_params))
-        print("Trainable tensors:", sum(1 for p in trainable_params))
-
-        trainable_params = [p for p in unet.parameters() if p.requires_grad]
-        if len(trainable_params) == 0:
-            raise RuntimeError("No trainable params found. LoRA may not have attached correctly.")
+    trainable_params = [p for p in unet.parameters() if p.requires_grad]
+    if len(trainable_params) == 0:
+        raise RuntimeError("No trainable params found. LoRA may not have attached correctly.")
 
     optimizer = torch.optim.AdamW(
         trainable_params,
