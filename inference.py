@@ -16,7 +16,6 @@ pipe = StableDiffusionXLPipeline.from_pretrained(
 ).to("cuda")
 
 pipe.load_lora_weights(LORA_PATH)
-pipe.vae.to(torch.float32)
 pipe.enable_attention_slicing()
 
 def build_prompt(_: str) -> str:
