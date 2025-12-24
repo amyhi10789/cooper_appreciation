@@ -1,37 +1,47 @@
 import torch
 from diffusers import StableDiffusionXLPipeline
 
-LORA_PATH = "output/cooper_lora/checkpoint-1500"
+LORA_PATH = "output/cooper_lora/checkpoint-1400"
 TOKEN = "cooper_person"
+
+NEGATIVE_PROMPT = (
+    "anime, cartoon, illustration, painting, "
+    "cgi, 3d render, plastic skin, doll, "
+    "perfect face, overly smooth skin, "
+    "sharp jawline, model face, beauty lighting, "
+    "unreal lighting, fake"
+)
 
 pipe = StableDiffusionXLPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0",
     torch_dtype=torch.float16,
 ).to("cuda")
 
+pipe.enable_model_cpu_offload()
 pipe.load_lora_weights(LORA_PATH)
 
-generator = torch.Generator("cuda").manual_seed(1234)
+def build_prompt(user_prompt: str) -> str:
+    base = (
+        f"include {TOKEN}, "
+    )
 
-prompt = (
-    f"realistic photo of {TOKEN}, man, head and shoulders portrait, "
-    "neutral expression, facing camera"
-)
+    user_prompt_lower = user_prompt.lower()
+    if "cooper" in user_prompt_lower or "cooper sigrist" in user_prompt_lower:
+        return f"{base}, {user_prompt}"
+    else:
+        return f"{base}, {user_prompt}, {TOKEN} is clearly visible and identifiable"
 
-negative_prompt = (
-    "child, teenager, young boy, female, soft face, "
-    "sketch, drawing, illustration, painting, line art"
-    "paper texture, text, watermark, waxy, glossy, smooth skin"
-)
+if __name__ == "__main__":
+    user_prompt = input("Prompt: ")
+    final_prompt = build_prompt(user_prompt)
 
-image = pipe(
-    prompt,
-    negative_prompt=negative_prompt,
-    generator=generator,
-    num_inference_steps=35,
-    guidance_scale=4.0,
-    height=1024,
-    width=1024,
-).images[0]
+    image = pipe(
+        final_prompt,
+        negative_prompt=NEGATIVE_PROMPT,
+        num_inference_steps=35,
+        guidance_scale=7.0,
+        height=1024,
+        width=1024
+    ).images[0]
 
-image.save("identity_check_1500.png")
+    image.save("test1.png")
