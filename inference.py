@@ -9,7 +9,7 @@ NEGATIVE_PROMPT = (
     "cartoon, anime, large mustache, rustic vibe, illustration, painting, "
     "overly smooth skin, plastic skin, airbrushed, "
     "distorted face, asymmetrical eyes, extra facial features, "
-    "text, watermark, noise"
+    "text, watermark, noise, black and white"
 )
 
 pipe = StableDiffusionXLPipeline.from_pretrained(
