@@ -4,34 +4,35 @@ from diffusers import StableDiffusionXLPipeline
 LORA_PATH = "output/cooper_lora/checkpoint-300"
 TOKEN = "cooper_person"
 
-NEGATIVE_PROMPT = (
-    "anime, cartoon, illustration, painting, "
-    "cgi, 3d render, plastic skin, doll, "
-    "overly smooth skin, unreal lighting, fake"
-)
-
 pipe = StableDiffusionXLPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0",
     torch_dtype=torch.float16,
 ).to("cuda")
 
-pipe.load_lora_weights(LORA_PATH)
-pipe.enable_attention_slicing()
+pipe.load_lora_weights(LORA_PATH, adapter_name="cooper")
+pipe.set_adapters(["cooper"], adapter_weights=[1.0])
 
-def build_prompt(_: str) -> str:
-    return f"{TOKEN}, realistic photo"
+generator = torch.Generator("cuda").manual_seed(1234)
 
-if __name__ == "__main__":
-    input("Press Enter to generate test image...")
-    final_prompt = build_prompt("")
+prompt = (
+    f"{TOKEN}, ultra realistic photo, DSLR photography, "
+    "sharp focus, natural lighting, full color, photorealistic"
+)
 
-    image = pipe(
-        final_prompt,
-        negative_prompt=NEGATIVE_PROMPT,
-        num_inference_steps=35,
-        guidance_scale=5.5,
-        height=1024,
-        width=1024,
-    ).images[0]
+negative_prompt = (
+    "sketch, drawing, illustration, painting, line art, "
+    "paper texture, text, watermark, noise"
+)
 
-    image.save("result_800.png")
+image = pipe(
+    prompt,
+    negative_prompt=negative_prompt,
+    generator=generator,
+    num_inference_steps=35,
+    guidance_scale=4.5,
+    height=1024,
+    width=1024,
+    cross_attention_kwargs={"scale": 1.2},
+).images[0]
+
+image.save("test.png")
