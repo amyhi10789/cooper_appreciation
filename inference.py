@@ -2,6 +2,7 @@ import torch
 from diffusers import StableDiffusionXLPipeline
 
 LORA_PATH = "output/cooper_lora/checkpoint-1400"
+LORA_PATH = "output/cooper_lora/checkpoint-1400"
 TOKEN = "cooper_person"
 
 NEGATIVE_PROMPT = (
