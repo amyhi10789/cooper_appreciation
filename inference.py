@@ -1,7 +1,7 @@
 import torch
 from diffusers import StableDiffusionXLPipeline
 
-LORA_PATH = "output/cooper_lora"
+LORA_PATH = "output/cooper_lora_yday"
 TOKEN = "cooper_person"
 
 NEGATIVE_PROMPT = (
@@ -44,4 +44,4 @@ if __name__ == "__main__":
         width=1024
     ).images[0]
 
-    image.save("test1.png")
+    image.save("test2.png")
