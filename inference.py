@@ -14,8 +14,7 @@ pipe.load_lora_weights(LORA_PATH)
 generator = torch.Generator("cuda").manual_seed(1234)
 
 prompt = (
-    f"realistic photo of {TOKEN}, head and shoulders portrait, "
-    "neutral expression, facing camera"
+    f"realistic colored photo of {TOKEN}, head and shoulders portrait, "
 )
 
 negative_prompt = (
