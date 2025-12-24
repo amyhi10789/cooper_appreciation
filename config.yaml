@@ -11,7 +11,8 @@ train_batch_size: 1
 gradient_accumulation_steps: 4 
 
 learning_rate: 1e-4
-max_train_steps: 800
+max_train_steps: 1400
+log_every: 200
 num_workers: 4
 
 rank: 64
