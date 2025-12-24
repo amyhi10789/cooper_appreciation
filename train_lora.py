@@ -119,12 +119,9 @@ def main():
         bias="none",
         target_modules=[
             "to_q", "to_k", "to_v", "to_out.0", 
-            "q_proj", "k_proj", "v_proj", "out_proj"
         ], 
     )
     unet.add_adapter(lora_config)
-    text_encoder_1.add_adapter(lora_config)
-    text_encoder_2.add_adapter(lora_config)
 
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
@@ -157,7 +154,7 @@ def main():
         eps=1e-8,
     )
 
-    train_resolution = int(cfg.get("resolution", 1024))
+    train_resolution = int(cfg.get("resolution", 768))
     dataset = ImageTextDataset(
         cfg["instance_data_dir"],
         cfg["instance_prompt"],
