@@ -41,6 +41,8 @@ class ImageTextDataset(Dataset):
         image = Image.open(path).convert("RGB")
         return {
             "pixel_values": self.transform(image),
+            "original_size": [self.resolution, self.resolution], 
+            "crop_coords_top_left": [0, 0],
             "prompt": self.prompt,
         }
 
@@ -99,6 +101,8 @@ def main():
         target_modules=["to_q", "to_k", "to_v", "to_out.0"],
     )
     unet.add_adapter(lora_config)
+    text_encoder_1.add_adapter(lora_config)
+    text_encoder_2.add_adapter(lora_config)
 
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
@@ -109,9 +113,15 @@ def main():
     else:
         print("No LoRA checkpoint found — training from base model")
 
-    print("Trainable params:", sum(p.numel() for p in unet.parameters() if p.requires_grad))
+    trainable_params = itertools.chain(
+        unet.parameters(),
+        text_encoder_1.parameters(),
+        text_encoder_2.parameters(),
+    )
+    trainable_params = [p for p in trainable_params if p.requires_grad]
 
-    print("Trainable tensors:", sum(1 for p in unet.parameters() if p.requires_grad))
+    print("Trainable params:", sum(p.numel() for p in trainable_params))
+    print("Trainable tensors:", sum(1 for p in trainable_params))
 
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
     if len(trainable_params) == 0:
@@ -140,11 +150,13 @@ def main():
         pin_memory=True,
     )
 
-    dataloader, optimizer, unet, vae, text_encoder_1, text_encoder_2 = accelerator.prepare(
-        dataloader, optimizer, unet, vae, text_encoder_1, text_encoder_2
+    dataloader, optimizer, unet, text_encoder_1, text_encoder_2 = accelerator.prepare(
+        dataloader, optimizer, unet, text_encoder_1, text_encoder_2
     )
 
-
+    # Move VAE manually since it's frozen and not in the list above
+    vae.to(device)
+    
     unet.train()
     global_step = 0
     max_train_steps = int(cfg["max_train_steps"])
