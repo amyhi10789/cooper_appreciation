@@ -6,7 +6,7 @@ TOKEN = "cooper_person"
 
 NEGATIVE_PROMPT = (
     "child, teenager, female, different person, "
-    "cartoon, anime, large bushy thick mustache, rustic vibe, illustration, painting, "
+    "cartoon, anime, large bushy thick beard, mustache, rustic vibe, illustration, painting, "
     "overly smooth skin, plastic skin, airbrushed, wrinkles, sharp jawline"
     "distorted face, asymmetrical eyes, extra facial features, latino man, sharp facial features"
     "text, watermark, noise, black and white, military tough vibe, forehead wrinkles"
@@ -28,7 +28,7 @@ def build_prompt(user_prompt: str) -> str:
         return (
             f"photo of {TOKEN}, adult man, lighter skin, head and shoulders portrait, "
             "light skin, short brown hair mostly covered by a dark blue cap, "
-            "trimmed beard, round face, soft straight nose, medium eyebrows, small ears"
+            "trimmed short small beard, round circular face, soft straight nose, medium eyebrows, small ears"
             "neutral expression, medium resolution, soft facial features"
             "indoor setting, soft natural lighting, blurry skin texture, "
         )
