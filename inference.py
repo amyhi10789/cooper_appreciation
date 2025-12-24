@@ -9,8 +9,8 @@ pipe = StableDiffusionXLPipeline.from_pretrained(
     torch_dtype=torch.float16,
 ).to("cuda")
 
-pipe.load_lora_weights(LORA_PATH, adapter_name="cooper")
-pipe.set_adapters(["cooper"], adapter_weights=[1.0])
+# IMPORTANT: no adapter_name, no set_adapters
+pipe.load_lora_weights(LORA_PATH)
 
 generator = torch.Generator("cuda").manual_seed(1234)
 
@@ -32,7 +32,7 @@ image = pipe(
     guidance_scale=4.5,
     height=1024,
     width=1024,
-    cross_attention_kwargs={"scale": 1.2},
+    cross_attention_kwargs={"scale": 1.0},
 ).images[0]
 
 image.save("test.png")
