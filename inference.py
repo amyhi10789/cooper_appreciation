@@ -6,11 +6,12 @@ TOKEN = "cooper_person"
 
 NEGATIVE_PROMPT = (
     "child, teenager, female, different person, "
-    "cartoon, anime, large bushy thick beard, mustache, rustic vibe, illustration, painting, "
-    "overly smooth skin, plastic skin, airbrushed, wrinkles, sharp jawline"
-    "distorted face, asymmetrical eyes, extra facial features, latino man, sharp facial features"
-    "text, watermark, noise, black and white, military tough vibe, forehead wrinkles"
+    "cartoon, anime, illustration, painting, "
+    "distorted face, asymmetrical eyes, extra facial features, "
+    "text, watermark, noise, black and white, "
+    "military tough vibe, aggressive expression"
 )
+
 
 pipe = StableDiffusionXLPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0",
@@ -26,12 +27,17 @@ def build_prompt(user_prompt: str) -> str:
 
     if "cooper" in user_prompt_lower or "cooper sigrist" in user_prompt_lower:
         return (
-            f"photo of {TOKEN}, adult man, lighter skin, head and shoulders portrait, "
-            "light skin, short light brown hair mostly covered by a dark blue cap, "
-            "trimmed short light brown, small beard, round circular face, soft straight nose, medium eyebrows, small ears"
-            "neutral expression, medium resolution, soft facial features"
-            "indoor setting, soft natural lighting, blurry skin texture, "
+            f"photo of {TOKEN}, young adult man in his mid 20s, "
+            "head and shoulders portrait, round face shape, "
+            "gentle jawline, soft chin, rounded cheeks, "
+            "soft straight nose, medium soft eyebrows, small ears, "
+            "trimmed short light brown beard, "
+            "short light brown hair mostly covered by a dark blue cap, "
+            "relaxed facial muscles, calm neutral expression, "
+            "soft diffused window light, portrait photography, "
+            "shallow depth of field, natural skin texture"
         )
+
     else:
         return (
             f"photo of {TOKEN}, {user_prompt}, "
