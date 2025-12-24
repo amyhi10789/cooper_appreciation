@@ -21,9 +21,6 @@ class ImageTextDataset(Dataset):
         self.transform = transforms.Compose(
             [
                 transforms.Resize((resolution, resolution)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(0.4, 0.4, 0.4, 0.2),
-                transforms.GaussianBlur(kernel_size = 3, sigma = (0.1, 0.5)),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
             ]
