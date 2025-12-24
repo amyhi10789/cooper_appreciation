@@ -20,7 +20,8 @@ class ImageTextDataset(Dataset):
 
         self.transform = transforms.Compose(
             [
-                transforms.Resize((resolution, resolution)),
+                transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop((resolution, resolution)),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
             ]
@@ -37,16 +38,31 @@ class ImageTextDataset(Dataset):
         return len(self.images)
 
     def __getitem__(self, idx):
-        path = os.path.join(self.image_dir, self.images[idx])
-        image = Image.open(path).convert("RGB")
+        image_name = self.images[idx]
+        image_path = os.path.join(self.image_dir, image_name)
+        image = Image.open(image_path).convert("RGB")
+
+        txt_path = os.path.splitext(image_path)[0] + ".txt"
+        if os.path.exists(txt_path):
+            with open(txt_path, "r", encoding="utf-8") as f:
+                prompt = f.read().strip()
+        else:
+            prompt = self.prompt
+
         return {
             "pixel_values": self.transform(image),
-            "prompt": self.prompt,
+            "prompt": prompt,
         }
+
 
 def main():
     with open("config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
+    
+    seed = int(cfg.get("seed", 42))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
     mixed_precision = cfg.get("mixed_precision", "fp16")
     grad_accum = int(cfg.get("gradient_accumulation_steps", 1))
@@ -76,6 +92,7 @@ def main():
             pass
 
     unet = pipe.unet
+    unet.enable_gradient_checkpointing()
     vae = pipe.vae
     text_encoder_1 = pipe.text_encoder
     text_encoder_2 = pipe.text_encoder_2
@@ -89,6 +106,10 @@ def main():
         text_encoder_2.parameters(),
     ):
         p.requires_grad_(False)
+    
+    vae.eval()
+    text_encoder_1.eval()
+    text_encoder_2.eval()
 
     rank = int(cfg["rank"])
     lora_config = LoraConfig(
@@ -125,11 +146,11 @@ def main():
         eps=1e-8,
     )
 
-    resolution = int(cfg.get("resolution", 1024))
+    train_resolution = int(cfg.get("resolution", 1024))
     dataset = ImageTextDataset(
         cfg["instance_data_dir"],
         cfg["instance_prompt"],
-        resolution,
+        train_resolution,
     )
 
     dataloader = DataLoader(
@@ -138,6 +159,7 @@ def main():
         shuffle=True,
         num_workers=int(cfg.get("num_workers", 4)),
         pin_memory=True,
+        drop_last=True,
     )
 
     dataloader, optimizer, unet, vae, text_encoder_1, text_encoder_2 = accelerator.prepare(
@@ -147,8 +169,11 @@ def main():
 
     unet.train()
     global_step = 0
+    optimizer.zero_grad(set_to_none=True)
+    last_logged_step = -1
     max_train_steps = int(cfg["max_train_steps"])
     log_every = int(cfg.get("log_every", 50))
+    
 
     for epoch in range(int(cfg.get("num_epochs", 1000))):
         for batch in dataloader:
@@ -193,17 +218,22 @@ def main():
 
                 with torch.no_grad():
                     enc1 = text_encoder_1(input_ids_1, return_dict=True).last_hidden_state
+
                     enc2_out = text_encoder_2(input_ids_2, return_dict=True)
                     enc2 = enc2_out.last_hidden_state
 
-                    encoder_hidden_states = torch.cat([enc1, enc2], dim=-1) 
-                    pooled_text_embeds = enc2[:, 0, :]         
+                    encoder_hidden_states = torch.cat([enc1, enc2], dim=-1)
 
+                    pooled_text_embeds = enc2_out.pooler_output
+
+                    if pooled_text_embeds is None:
+                        pooled_text_embeds = enc2[:, 0, :]
+                        
                 if pooled_text_embeds.dim() == 1:
                     pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
 
                 time_ids = torch.tensor(
-                    [[resolution, resolution, 0, 0, resolution, resolution]] * bsz,
+                    [[train_resolution, train_resolution, 0, 0, train_resolution, train_resolution]] * bsz,
                     device=device,
                     dtype=pooled_text_embeds.dtype,
                 )
@@ -228,20 +258,29 @@ def main():
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 accelerator.backward(loss)
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
 
-            global_step += 1
+                if accelerator.sync_gradients:
+                    accelerator.clip_grad_norm_(trainable_params, max_norm=1.0)
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
+                    global_step += 1
 
-            if accelerator.is_main_process and global_step % log_every == 0:
+
+            if (
+                accelerator.is_main_process
+                and accelerator.sync_gradients
+                and global_step % log_every == 0
+                and global_step != last_logged_step
+            ):
+                last_logged_step = global_step
+
                 print(f"Step {global_step}/{max_train_steps} | Loss {loss.item():.4f}")
                 ckpt_dir = os.path.join(cfg["output_dir"], f"checkpoint-{global_step}")
                 os.makedirs(ckpt_dir, exist_ok=True)
 
                 unet_to_save = accelerator.unwrap_model(unet)
-                unet_to_save.save_lora_adapter(ckpt_dir)
+                unet_to_save.save_attn_procs(ckpt_dir)
 
-                print(f"Saved LoRA checkpoint to {ckpt_dir}")
 
             if global_step >= max_train_steps:
                 break
@@ -262,7 +301,7 @@ def main():
             f.write(f"base_model: {cfg['model_name_or_path']}\n")
             f.write(f"rank: {rank}\n")
             f.write(f"learning_rate: {cfg['learning_rate']}\n")
-            f.write(f"resolution: {resolution}\n")
+            f.write(f"resolution: {train_resolution}\n")
             f.write(f"steps: {max_train_steps}\n")
             f.write(f"prompt: {cfg['instance_prompt']}\n")
 
