@@ -128,26 +128,33 @@ def main():
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
 
+    adapter_loaded = False
+
     if resume_from_lora and resume_lora_path and os.path.exists(resume_lora_path):
-        print(f"Loading LoRA weights from: {resume_lora_path}")
+        print(f"Attempting to load LoRA weights from: {resume_lora_path}")
 
-        unet.load_lora_adapter(
-            resume_lora_path,
-            adapter_name=ADAPTER_NAME,
-            use_safetensors=True,
-        )
-        unet.set_adapter(ADAPTER_NAME)
+        try:
+            unet.load_lora_adapter(
+                resume_lora_path,
+                adapter_name=ADAPTER_NAME,
+                use_safetensors=True,
+                prefix=None,  # IMPORTANT for SDXL compatibility
+            )
+            unet.set_adapter(ADAPTER_NAME)
+            adapter_loaded = True
+            print("LoRA adapter successfully loaded.")
+        except Exception as e:
+            print("⚠️ Failed to load existing LoRA adapter, training from scratch.")
+            print(e)
 
-    else:
-        print("No LoRA checkpoint found — training from base model")
+    if not adapter_loaded:
+        print("Initializing new LoRA adapter")
 
         unet.add_adapter(
             lora_config,
             adapter_name=ADAPTER_NAME,
         )
         unet.set_adapter(ADAPTER_NAME)
-
-
 
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
 
