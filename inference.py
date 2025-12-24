@@ -27,7 +27,7 @@ def build_prompt(user_prompt: str) -> str:
 
     user_prompt_lower = user_prompt.lower()
     if "cooper" in user_prompt_lower or "cooper sigrist" in user_prompt_lower:
-        return f"{base}, {user_prompt}"
+        return f"{base}, realistic colored photo {user_prompt}"
     else:
         return f"{base}, {user_prompt}, {TOKEN} is clearly visible and identifiable"
 
