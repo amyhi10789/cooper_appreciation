@@ -1,7 +1,7 @@
 import torch
 from diffusers import StableDiffusionXLPipeline
 
-LORA_PATH = "output/test/pytorch_lora_weights.safetensors"
+LORA_PATH = "output/cooper_lora"
 TOKEN = "cooper_person"
 
 NEGATIVE_PROMPT = (
