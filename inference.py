@@ -1,7 +1,7 @@
 import torch
 from diffusers import StableDiffusionXLPipeline
 
-LORA_PATH = "output/cooper_lora/checkpoint-1500"
+LORA_PATH = "output/cooper_lora/checkpoint-800"
 TOKEN = "cooper_person"
 
 pipe = StableDiffusionXLPipeline.from_pretrained(
@@ -14,7 +14,7 @@ pipe.load_lora_weights(LORA_PATH)
 generator = torch.Generator("cuda").manual_seed(1234)
 
 prompt = (
-    f"realistic photo of {TOKEN}, man, head and shoulders portrait, "
+    f"realistic photo of {TOKEN}, head and shoulders portrait, "
     "neutral expression, facing camera"
 )
 
@@ -34,4 +34,4 @@ image = pipe(
     width=1024,
 ).images[0]
 
-image.save("identity_check_1500.png")
+image.save("identity_check_800.png")
