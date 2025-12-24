@@ -13,7 +13,7 @@ from diffusers import StableDiffusionXLPipeline, DDPMScheduler
 from peft import LoraConfig
 
 class ImageTextDataset(Dataset):
-    def __init__(self, image_dir, prompt, resolution=512):
+    def __init__(self, image_dir, prompt, resolution=768):
         self.image_dir = image_dir
         self.prompt = prompt
         self.resolution = resolution
