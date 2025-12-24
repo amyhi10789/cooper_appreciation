@@ -20,8 +20,8 @@ prompt = (
 
 negative_prompt = (
     "child, teenager, young boy, female, soft face, "
-    "sketch, drawing, illustration, painting, line art, "
-    "paper texture, text, watermark, waxy, glossy, smooth skin";
+    "sketch, drawing, illustration, painting, line art"
+    "paper texture, text, watermark, waxy, glossy, smooth skin"
 )
 
 image = pipe(
