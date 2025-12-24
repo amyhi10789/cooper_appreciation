@@ -123,8 +123,6 @@ def main():
         ],
     )
 
-    unet.add_adapter(lora_config)
-
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
 
@@ -133,6 +131,8 @@ def main():
         unet.load_attn_procs(resume_lora_path)
     else:
         print("No LoRA checkpoint found — training from base model")
+        unet.add_adapter(lora_config)
+
 
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
 
