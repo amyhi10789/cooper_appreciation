@@ -98,7 +98,10 @@ def main():
         lora_alpha=int(cfg.get("lora_alpha", rank)),
         lora_dropout=float(cfg.get("lora_dropout", 0.0)),
         bias="none",
-        target_modules=["to_q", "to_k", "to_v", "to_out.0"],
+        target_modules=[
+            "to_q", "to_k", "to_v", "to_out.0", 
+            "q_proj", "k_proj", "v_proj", "out_proj"
+        ], 
     )
     unet.add_adapter(lora_config)
     text_encoder_1.add_adapter(lora_config)
@@ -156,7 +159,7 @@ def main():
 
     # Move VAE manually since it's frozen and not in the list above
     vae.to(device)
-    
+
     unet.train()
     global_step = 0
     max_train_steps = int(cfg["max_train_steps"])
