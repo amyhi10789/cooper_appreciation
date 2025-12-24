@@ -131,14 +131,21 @@ def main():
     if resume_from_lora and resume_lora_path and os.path.exists(resume_lora_path):
         print(f"Loading LoRA weights from: {resume_lora_path}")
 
-        unet.load_lora_adapter(resume_lora_path, adapter_name=ADAPTER_NAME)
+        unet.load_lora_adapter(
+            resume_lora_path,
+            adapter_name=ADAPTER_NAME,
+        )
         unet.set_adapter(ADAPTER_NAME)
 
     else:
         print("No LoRA checkpoint found — training from base model")
 
-        unet.add_adapter(lora_config, adapter_name=ADAPTER_NAME)
+        unet.add_adapter(
+            lora_config,
+            adapter_name=ADAPTER_NAME,
+        )
         unet.set_adapter(ADAPTER_NAME)
+
 
 
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
