@@ -1,7 +1,7 @@
 import torch
 from diffusers import StableDiffusionXLPipeline
 
-LORA_PATH = "output/cooper_lora/checkpoint-500"
+LORA_PATH = "output/cooper_lora/checkpoint-1400"
 TOKEN = "cooper_person"
 
 pipe = StableDiffusionXLPipeline.from_pretrained(
@@ -34,4 +34,4 @@ image = pipe(
     width=1024,
 ).images[0]
 
-image.save("identity_check_500.png")
+image.save("identity_check_1400.png")
