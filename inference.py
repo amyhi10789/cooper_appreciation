@@ -8,7 +8,7 @@ NEGATIVE_PROMPT = (
     "child, teenager, female, different person, "
     "cartoon, anime, large mustache, rustic vibe, illustration, painting, "
     "overly smooth skin, plastic skin, airbrushed, "
-    "distorted face, asymmetrical eyes, extra facial features, "
+    "distorted face, asymmetrical eyes, extra facial features, latino man"
     "text, watermark, noise, black and white"
 )
 
