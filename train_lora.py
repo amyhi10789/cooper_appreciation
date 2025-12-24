@@ -124,19 +124,21 @@ def main():
     )
 
     ADAPTER_NAME = "cooper"
-    unet.add_adapter(lora_config, adapter_name=ADAPTER_NAME)
-    unet.set_adapter(ADAPTER_NAME)
-
 
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
 
     if resume_from_lora and resume_lora_path and os.path.exists(resume_lora_path):
         print(f"Loading LoRA weights from: {resume_lora_path}")
+
         unet.load_attn_procs(resume_lora_path, adapter_name=ADAPTER_NAME)
+        unet.set_adapter(ADAPTER_NAME)
+
     else:
         print("No LoRA checkpoint found — training from base model")
 
+        unet.add_adapter(lora_config, adapter_name=ADAPTER_NAME)
+        unet.set_adapter(ADAPTER_NAME)
 
 
     trainable_params = [p for p in unet.parameters() if p.requires_grad]
