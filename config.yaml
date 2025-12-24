@@ -19,7 +19,7 @@ lora_alpha: 16
 lora_dropout: 0.05
 
 resume_from_lora: true
-resume_lora_path: output/cooper_lora_old/pytorch_lora_weights.safetensors
+resume_lora_path: output/cooper_lora_old/checkpoint-100
 
 mixed_precision: bf16
 seed: 42
