@@ -237,10 +237,14 @@ def main():
 
                     encoder_hidden_states = torch.cat([enc1, enc2], dim=-1)
 
-                    pooled_text_embeds = enc2_out.pooler_output
+                    pooled_text_embeds = getattr(enc2_out, "text_embeds", None)
+
+                    if pooled_text_embeds is None:
+                        pooled_text_embeds = getattr(enc2_out, "pooler_output", None)
 
                     if pooled_text_embeds is None:
                         pooled_text_embeds = enc2[:, 0, :]
+
                         
                 if pooled_text_embeds.dim() == 1:
                     pooled_text_embeds = pooled_text_embeds.unsqueeze(0)
