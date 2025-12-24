@@ -1,7 +1,7 @@
 import torch
 from diffusers import StableDiffusionXLPipeline
 
-LORA_PATH = "output/cooper_lora/checkpoint-800"
+LORA_PATH = "output/cooper_lora/checkpoint-300"
 TOKEN = "cooper_person"
 
 NEGATIVE_PROMPT = (
@@ -20,7 +20,7 @@ pipe.vae.to(torch.float32)
 pipe.enable_attention_slicing()
 
 def build_prompt(_: str) -> str:
-    return f"{TOKEN}, realistic photo, full color, natural skin tones, DSLR photography, high resolution"
+    return f"{TOKEN}, realistic photo"
 
 if __name__ == "__main__":
     input("Press Enter to generate test image...")

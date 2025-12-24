@@ -18,7 +18,7 @@ lora_alpha: 32
 lora_dropout: 0.05
 
 resume_from_lora: true
-resume_lora_path: output/cooper_lora/checkpoint-350
+resume_lora_path: output/cooper_lora/checkpoint-300
 
 mixed_precision: bf16
 seed: 42
