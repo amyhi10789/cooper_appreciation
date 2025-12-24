@@ -134,8 +134,10 @@ def main():
         unet.load_lora_adapter(
             resume_lora_path,
             adapter_name=ADAPTER_NAME,
+            use_safetensors=True,
         )
         unet.set_adapter(ADAPTER_NAME)
+
 
     else:
         print("No LoRA checkpoint found — training from base model")
@@ -143,6 +145,7 @@ def main():
         unet.add_adapter(
             lora_config,
             adapter_name=ADAPTER_NAME,
+            use_safetensors=True,
         )
         unet.set_adapter(ADAPTER_NAME)
 
