@@ -9,7 +9,7 @@ NEGATIVE_PROMPT = (
     "cartoon, anime, large mustache, rustic vibe, illustration, painting, "
     "overly smooth skin, plastic skin, airbrushed, "
     "distorted face, asymmetrical eyes, extra facial features, latino man"
-    "text, watermark, noise, black and white"
+    "text, watermark, noise, black and white, military vibe"
 )
 
 pipe = StableDiffusionXLPipeline.from_pretrained(
@@ -29,7 +29,7 @@ def build_prompt(user_prompt: str) -> str:
             f"photo of {TOKEN}, adult man, head and shoulders portrait, "
             "light skin, short brown hair mostly covered by a black baseball cap, "
             "trimmed beard and mustache, oval face, straight nose, medium eyebrows, "
-            "neutral expression, looking directly at camera, "
+            "neutral expression"
             "indoor setting, soft natural lighting, realistic skin texture, "
             "sharp focus, DSLR photo"
         )
