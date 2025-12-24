@@ -51,9 +51,7 @@ class ImageTextDataset(Dataset):
 
         return {
             "pixel_values": self.transform(image),
-            "original_size": [self.resolution, self.resolution], 
-            "crop_coords_top_left": [0, 0],
-            "prompt": self.prompt,
+            "prompt": prompt,
         }
 
 
