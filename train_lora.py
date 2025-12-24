@@ -112,16 +112,16 @@ def main():
     text_encoder_2.eval()
 
     rank = int(cfg["rank"])
+    
     lora_config = LoraConfig(
         r=rank,
         lora_alpha=int(cfg.get("lora_alpha", rank)),
         lora_dropout=float(cfg.get("lora_dropout", 0.0)),
         bias="none",
         target_modules=[
-            "to_q", "to_k", "to_v", "to_out.0", 
-        ], 
+            "to_q", "to_k", "to_v", "to_out.0",
+        ],
     )
-    unet.add_adapter(lora_config)
 
     resume_from_lora = cfg.get("resume_from_lora", False)
     resume_lora_path = cfg.get("resume_lora_path", None)
@@ -131,6 +131,8 @@ def main():
         unet.load_attn_procs(resume_lora_path)
     else:
         print("No LoRA checkpoint found — training from base model")
+        unet.add_adapter(lora_config)
+
 
     trainable_params = itertools.chain(
         unet.parameters(),
