@@ -19,7 +19,6 @@ pipe = StableDiffusionXLPipeline.from_pretrained(
 
 pipe.enable_model_cpu_offload()
 pipe.load_lora_weights(LORA_PATH)
-pipe.set_adapters(["default"], adapter_weights=[2.0])
 
 def build_prompt(user_prompt: str) -> str:
     base = (
@@ -42,7 +41,7 @@ if __name__ == "__main__":
         final_prompt,
         negative_prompt=NEGATIVE_PROMPT,
         num_inference_steps=35,
-        guidance_scale=5.5,
+        guidance_scale=7.0,
         height=1024,
         width=1024
     ).images[0]
