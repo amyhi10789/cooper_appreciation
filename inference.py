@@ -28,7 +28,7 @@ def build_prompt(user_prompt: str) -> str:
         return (
             f"photo of {TOKEN}, adult man, lighter skin, head and shoulders portrait, "
             "light skin, short brown hair mostly covered by a dark blue cap, "
-            "trimmed beard, round face, straight nose, medium eyebrows, "
+            "trimmed beard, round face, straight and not sharp nose, medium eyebrows, small ears"
             "neutral expression"
             "indoor setting, soft natural lighting, realistic skin texture, "
         )
