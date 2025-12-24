@@ -27,8 +27,8 @@ def build_prompt(user_prompt: str) -> str:
     if "cooper" in user_prompt_lower or "cooper sigrist" in user_prompt_lower:
         return (
             f"photo of {TOKEN}, adult man, lighter skin, head and shoulders portrait, "
-            "light skin, short brown hair mostly covered by a dark blue cap, "
-            "trimmed short small beard, round circular face, soft straight nose, medium eyebrows, small ears"
+            "light skin, short light brown hair mostly covered by a dark blue cap, "
+            "trimmed short light brown, small beard, round circular face, soft straight nose, medium eyebrows, small ears"
             "neutral expression, medium resolution, soft facial features"
             "indoor setting, soft natural lighting, blurry skin texture, "
         )
